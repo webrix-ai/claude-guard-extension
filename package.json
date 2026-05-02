@@ -1,0 +1,12 @@
+{
+  "name": "claude-guard-extension",
+  "version": "1.0.0",
+  "description": "Chrome extension that monitors and controls API calls made by Claude browser agents",
+  "license": "ISC",
+  "scripts": {
+    "icons": "node scripts/generate-icons.js",
+    "version-sync": "node scripts/version-sync.js",
+    "pack:zip": "npm run version-sync && bash scripts/pack-zip.sh",
+    "build": "npm run pack:zip"
+  }
+}
