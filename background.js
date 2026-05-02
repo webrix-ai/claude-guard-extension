@@ -15,55 +15,9 @@ chrome.runtime.onInstalled.addListener(async () => {
   console.log("[Guardian] Extension installed, default rules initialized");
 });
 
-// --- Logging via webRequest (observational, not blocking) ---
-
-chrome.webRequest.onBeforeRequest.addListener(
-  (details) => {
-    if (
-      details.type === "main_frame" ||
-      details.type === "sub_frame" ||
-      details.tabId < 0
-    ) {
-      return;
-    }
-    handleRequest(details);
-  },
-  { urls: ["https://*/*", "http://*/*"] }
-);
-
-async function handleRequest(details) {
-  const { tabId, url, method, type, requestId } = details;
-  if (!agentTabs.has(tabId)) return;
-
-  const tabInfo = agentTabs.get(tabId);
-  const pageUrl = tabInfo?.url || "unknown";
-  const rules = await getRules();
-  const result = evaluateRequest(url, method, rules, pageUrl);
-
-  const event = {
-    url,
-    method,
-    resourceType: type,
-    tabId,
-    requestId,
-    action: result.action,
-    matchedRule: result.rule
-      ? { id: result.rule.id, pattern: result.rule.pattern, method: result.rule.method, pagePattern: result.rule.pagePattern }
-      : null,
-    pageUrl,
-  };
-
-  await addEvent(event);
-
-  chrome.runtime.sendMessage({
-    type: "new-event",
-    event,
-  }).catch(() => {});
-
-  if (result.action === "block") {
-    console.log(`[Guardian] BLOCKED ${method} ${url} from page ${pageUrl} (rule: ${result.rule?.id || "default"})`);
-  }
-}
+// webRequest is kept for observing requests that bypass the interceptor
+// (e.g. requests initiated by other extensions, service workers, etc.)
+// The primary logging path is the interceptor → content.js → "intercepted-request"
 
 // --- Actual blocking via declarativeNetRequest ---
 
@@ -154,6 +108,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       syncDnrRules();
       console.log(`[Guardian] Agent detected on tab ${tabId}: ${sender.tab.url}`);
     }
+    sendResponse({ ok: true });
+    return;
+  }
+
+  if (message.type === "intercepted-request") {
+    const tabId = sender.tab?.id;
+    const tabInfo = tabId != null ? agentTabs.get(tabId) : null;
+
+    const event = {
+      url: message.url,
+      method: message.method,
+      resourceType: "intercepted",
+      tabId: tabId || -1,
+      action: message.action,
+      matchedRule: message.matchedRule || null,
+      pageUrl: message.pageUrl || tabInfo?.url || "unknown",
+    };
+
+    addEvent(event).then((saved) => {
+      chrome.runtime.sendMessage({ type: "new-event", event: saved }).catch(() => {});
+    });
+
     sendResponse({ ok: true });
     return;
   }

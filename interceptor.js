@@ -38,7 +38,7 @@
         matchPattern(url, rule.pattern) &&
         matchPattern(pageUrl, rule.pagePattern)
       ) {
-        return rule.action;
+        return { action: rule.action, rule: rule };
       }
     }
 
@@ -48,13 +48,15 @@
         matchPattern(url, rule.pattern) &&
         matchPattern(pageUrl, rule.pagePattern)
       ) {
-        return rule.action;
+        return { action: rule.action, rule: rule };
       }
     }
 
-    if (BLOCKED_METHODS.has(method)) return "block";
-    return "allow";
+    if (BLOCKED_METHODS.has(method)) return { action: "block", rule: null };
+    return { action: "allow", rule: null };
   }
+
+  var lastResult = null;
 
   function resolveUrl(input) {
     try {
@@ -67,23 +69,36 @@
 
   function shouldBlock(url, method) {
     if (!active) return false;
-    return evaluate(url, method.toUpperCase()) === "block";
+    lastResult = evaluate(url, method.toUpperCase());
+    return lastResult.action === "block";
   }
 
-  function logBlock(method, url) {
-    console.warn(
-      "%c[Webrix Guard]%c Blocked %c" + method + "%c " + url,
-      "color:#a78bfa;font-weight:bold",
-      "color:#f87171",
-      "color:#f87171;font-weight:bold",
-      "color:#f87171"
-    );
+  function reportEvent(method, url, action) {
+    var matchedRule = lastResult && lastResult.rule
+      ? { id: lastResult.rule.id, pattern: lastResult.rule.pattern, method: lastResult.rule.method, pagePattern: lastResult.rule.pagePattern }
+      : null;
+
     window.postMessage({
       source: "webrix-guard-interceptor",
-      type: "blocked",
+      type: "request-event",
       method: method,
       url: url,
+      action: action,
+      pageUrl: location.href,
+      matchedRule: matchedRule,
     }, "*");
+
+    lastResult = null;
+
+    if (action === "block") {
+      console.warn(
+        "%c[Claude Guard]%c Blocked %c" + method + "%c " + url,
+        "color:#a78bfa;font-weight:bold",
+        "color:#f87171",
+        "color:#f87171;font-weight:bold",
+        "color:#f87171"
+      );
+    }
   }
 
   // --- Override fetch() ---
@@ -93,13 +108,16 @@
     const url = resolveUrl(input);
     const method = ((init && init.method) || (input instanceof Request ? input.method : "GET")).toUpperCase();
 
+    if (!active) return originalFetch.apply(this, arguments);
+
     if (shouldBlock(url, method)) {
-      logBlock(method, url);
+      reportEvent(method, url, "block");
       return Promise.reject(
-        new DOMException("[Webrix Guard] Request blocked: " + method + " " + url, "AbortError")
+        new DOMException("[Claude Guard] Request blocked: " + method + " " + url, "AbortError")
       );
     }
 
+    reportEvent(method, url, "allow");
     return originalFetch.apply(this, arguments);
   };
 
@@ -115,14 +133,18 @@
   };
 
   XMLHttpRequest.prototype.send = function () {
+    if (!active) return originalSend.apply(this, arguments);
+
     if (shouldBlock(this.__wgUrl, this.__wgMethod)) {
-      logBlock(this.__wgMethod, this.__wgUrl);
+      reportEvent(this.__wgMethod, this.__wgUrl, "block");
       Object.defineProperty(this, "status", { get: function () { return 0; } });
       Object.defineProperty(this, "readyState", { get: function () { return 4; } });
       this.dispatchEvent(new ProgressEvent("error"));
       this.dispatchEvent(new ProgressEvent("loadend"));
       return;
     }
+
+    reportEvent(this.__wgMethod, this.__wgUrl, "allow");
     return originalSend.apply(this, arguments);
   };
 
@@ -131,10 +153,15 @@
   if (navigator.sendBeacon) {
     const originalBeacon = navigator.sendBeacon.bind(navigator);
     navigator.sendBeacon = function (url, data) {
-      if (shouldBlock(resolveUrl(url), "POST")) {
-        logBlock("POST", resolveUrl(url));
+      var resolvedUrl = resolveUrl(url);
+      if (!active) return originalBeacon(url, data);
+
+      if (shouldBlock(resolvedUrl, "POST")) {
+        reportEvent("POST", resolvedUrl, "block");
         return false;
       }
+
+      reportEvent("POST", resolvedUrl, "allow");
       return originalBeacon(url, data);
     };
   }
@@ -146,10 +173,14 @@
     const method = (this.method || "GET").toUpperCase();
     const url = resolveUrl(this.action || location.href);
 
+    if (!active) return originalSubmit.apply(this, arguments);
+
     if (shouldBlock(url, method)) {
-      logBlock(method, url);
+      reportEvent(method, url, "block");
       return;
     }
+
+    reportEvent(method, url, "allow");
     return originalSubmit.apply(this, arguments);
   };
 
@@ -159,10 +190,14 @@
       const method = (this.method || "GET").toUpperCase();
       const url = resolveUrl(this.action || location.href);
 
+      if (!active) return originalRequestSubmit.apply(this, arguments);
+
       if (shouldBlock(url, method)) {
-        logBlock(method, url);
+        reportEvent(method, url, "block");
         return;
       }
+
+      reportEvent(method, url, "allow");
       return originalRequestSubmit.apply(this, arguments);
     };
   }
@@ -176,7 +211,7 @@
       active = true;
       rules = e.data.rules || [];
       console.log(
-        "%c[Webrix Guard]%c Active — monitoring " + rules.length + " rules",
+        "%c[Claude Guard]%c Active — monitoring " + rules.length + " rules",
         "color:#a78bfa;font-weight:bold",
         "color:#4ade80"
       );
@@ -185,7 +220,7 @@
     if (e.data.type === "deactivate") {
       active = false;
       console.log(
-        "%c[Webrix Guard]%c Deactivated",
+        "%c[Claude Guard]%c Deactivated",
         "color:#a78bfa;font-weight:bold",
         "color:#71717a"
       );

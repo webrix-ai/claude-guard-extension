@@ -60,6 +60,21 @@ chrome.runtime.onMessage.addListener((msg) => {
   }
 });
 
+window.addEventListener("message", (e) => {
+  if (!e.data || e.data.source !== "webrix-guard-interceptor") return;
+
+  if (e.data.type === "request-event") {
+    chrome.runtime.sendMessage({
+      type: "intercepted-request",
+      url: e.data.url,
+      method: e.data.method,
+      action: e.data.action,
+      pageUrl: e.data.pageUrl,
+      matchedRule: e.data.matchedRule || null,
+    }).catch(() => {});
+  }
+});
+
 function startObserving() {
   checkForAgent();
 
