@@ -1,295 +1,126 @@
-importScripts("rules.js", "storage.js");
+var agentTabs = new Set();
 
-const GRACE_PERIOD_MS = 3 * 60 * 1000;
-const DNR_RULE_ID_START = 10001;
+var DEFAULT_STATE = {
+  allowList: [],
+  blockList: [],
+  autoMode: true,
+  stats: { blocked: 0, allowed: 0 },
+  log: []
+};
 
-const agentTabs = new Map();
-const removalTimers = new Map();
-
-chrome.runtime.onInstalled.addListener(async () => {
-  const data = await chrome.storage.local.get(STORAGE_KEYS.RULES);
-  if (!data[STORAGE_KEYS.RULES]) {
-    await saveRules([...DEFAULT_RULES]);
-  }
-  await syncDnrRules();
-  console.log("[Guardian] Extension installed, default rules initialized");
-});
-
-// webRequest is kept for observing requests that bypass the interceptor
-// (e.g. requests initiated by other extensions, service workers, etc.)
-// The primary logging path is the interceptor → content.js → "intercepted-request"
-
-// --- Actual blocking via declarativeNetRequest ---
-
-async function syncDnrRules() {
-  const existing = await chrome.declarativeNetRequest.getDynamicRules();
-  const removeIds = existing.map((r) => r.id);
-
-  const agentTabIds = Array.from(agentTabs.keys());
-
-  if (agentTabIds.length === 0) {
-    if (removeIds.length > 0) {
-      await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: removeIds });
-    }
-    console.log("[Guardian] DNR: no agent tabs, all rules cleared");
-    return;
-  }
-
-  const userRules = await getRules();
-  const dnrRules = [];
-  let ruleId = DNR_RULE_ID_START;
-
-  for (const rule of userRules) {
-    const dnr = toDnrRule(rule, ruleId, agentTabIds);
-    if (dnr) {
-      dnrRules.push(dnr);
-      ruleId++;
-    }
-  }
-
-  await chrome.declarativeNetRequest.updateDynamicRules({
-    removeRuleIds: removeIds,
-    addRules: dnrRules,
+function getState() {
+  return chrome.storage.local.get('cg').then(function (data) {
+    return Object.assign({}, DEFAULT_STATE, data.cg);
   });
-
-  console.log(`[Guardian] DNR: synced ${dnrRules.length} rules for ${agentTabIds.length} agent tab(s)`);
 }
 
-function toDnrRule(rule, id, tabIds) {
-  const condition = {
-    tabIds,
-    excludedResourceTypes: ["main_frame", "sub_frame"],
-  };
-
-  if (rule.pattern && rule.pattern !== "*") {
-    condition.urlFilter = rule.pattern;
-  } else {
-    condition.urlFilter = "*";
-  }
-
-  if (rule.method && rule.method !== "*") {
-    condition.requestMethods = [rule.method.toLowerCase()];
-  }
-
-  if (rule.pagePattern && rule.pagePattern !== "*") {
-    const domain = extractDomainFromPattern(rule.pagePattern);
-    if (domain) {
-      condition.initiatorDomains = [domain];
-    }
-  }
-
-  const priority = rule.type === "custom" ? 2 : 1;
-
-  return {
-    id,
-    priority,
-    action: { type: rule.action === "allow" ? "allow" : "block" },
-    condition,
-  };
+function setState(state) {
+  return chrome.storage.local.set({ cg: state });
 }
 
-// --- Message handling ---
+function broadcast(msg) {
+  chrome.tabs.query({}).then(function (tabs) {
+    tabs.forEach(function (t) {
+      chrome.tabs.sendMessage(t.id, msg).catch(function () {});
+    });
+  });
+}
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === "agent-detected") {
-    const tabId = sender.tab?.id;
-    if (tabId != null) {
-      if (removalTimers.has(tabId)) {
-        clearTimeout(removalTimers.get(tabId));
-        removalTimers.delete(tabId);
-        console.log(`[Guardian] Agent re-detected on tab ${tabId}, cancelled grace period`);
+chrome.runtime.onInstalled.addListener(function () {
+  chrome.storage.local.get('cg').then(function (data) {
+    if (!data.cg) chrome.storage.local.set({ cg: DEFAULT_STATE });
+  });
+});
+
+chrome.tabs.onRemoved.addListener(function (tabId) {
+  agentTabs.delete(tabId);
+});
+
+chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
+  switch (msg.type) {
+
+    case 'get-state':
+      getState().then(reply);
+      return true;
+
+    case 'get-tab-status':
+      reply({ agentActive: agentTabs.has(msg.tabId) });
+      return false;
+
+    case 'set-auto-mode':
+      getState().then(function (s) {
+        s.autoMode = msg.enabled;
+        return setState(s).then(function () {
+          broadcast({ type: 'rules-updated', allowList: s.allowList, blockList: s.blockList, autoMode: s.autoMode });
+          reply({ ok: true });
+        });
+      });
+      return true;
+
+    case 'add-rule':
+      getState().then(function (s) {
+        var list = msg.list === 'allow' ? 'allowList' : 'blockList';
+        var exists = s[list].some(function (r) {
+          return r.pattern === msg.rule.pattern && r.method === msg.rule.method;
+        });
+        if (!exists) s[list].push(msg.rule);
+        return setState(s).then(function () {
+          broadcast({ type: 'rules-updated', allowList: s.allowList, blockList: s.blockList, autoMode: s.autoMode });
+          reply({ ok: true });
+        });
+      });
+      return true;
+
+    case 'remove-rule':
+      getState().then(function (s) {
+        var list = msg.list === 'allow' ? 'allowList' : 'blockList';
+        s[list].splice(msg.index, 1);
+        return setState(s).then(function () {
+          broadcast({ type: 'rules-updated', allowList: s.allowList, blockList: s.blockList, autoMode: s.autoMode });
+          reply({ ok: true });
+        });
+      });
+      return true;
+
+    case 'log-event':
+      getState().then(function (s) {
+        s.log.unshift({ method: msg.event.method, url: msg.event.url, action: msg.event.action, ts: Date.now() });
+        if (s.log.length > 200) s.log.length = 200;
+        if (msg.event.action === 'block') s.stats.blocked++;
+        else s.stats.allowed++;
+        return setState(s).then(function () { reply({ ok: true }); });
+      });
+      return true;
+
+    case 'clear-stats':
+      getState().then(function (s) {
+        s.stats = { blocked: 0, allowed: 0 };
+        s.log = [];
+        return setState(s).then(function () { reply({ ok: true }); });
+      });
+      return true;
+
+    case 'agent-on':
+      if (sender.tab && sender.tab.id) {
+        agentTabs.add(sender.tab.id);
+        chrome.action.setIcon({
+          path: { 16: 'icons/icon16-active.png', 48: 'icons/icon48-active.png', 128: 'icons/icon128-active.png' },
+          tabId: sender.tab.id
+        }).catch(function () {});
+        chrome.action.setBadgeText({ text: 'ON', tabId: sender.tab.id }).catch(function () {});
+        chrome.action.setBadgeBackgroundColor({ color: '#22c55e', tabId: sender.tab.id }).catch(function () {});
       }
-      agentTabs.set(tabId, {
-        url: sender.tab.url,
-        detectedAt: Date.now(),
-      });
-      setAgentTab(tabId, true);
-      updateBadge(tabId, true);
-      syncDnrRules();
-      console.log(`[Guardian] Agent detected on tab ${tabId}: ${sender.tab.url}`);
-    }
-    sendResponse({ ok: true });
-    return;
-  }
+      return false;
 
-  if (message.type === "intercepted-request") {
-    const tabId = sender.tab?.id;
-    const tabInfo = tabId != null ? agentTabs.get(tabId) : null;
-
-    const event = {
-      url: message.url,
-      method: message.method,
-      resourceType: "intercepted",
-      tabId: tabId || -1,
-      action: message.action,
-      matchedRule: message.matchedRule || null,
-      pageUrl: message.pageUrl || tabInfo?.url || "unknown",
-    };
-
-    addEvent(event).then((saved) => {
-      chrome.runtime.sendMessage({ type: "new-event", event: saved }).catch(() => {});
-    });
-
-    sendResponse({ ok: true });
-    return;
-  }
-
-  if (message.type === "agent-removed") {
-    const tabId = sender.tab?.id;
-    if (tabId != null) {
-      scheduleRemoval(tabId);
-    }
-    sendResponse({ ok: true });
-    return;
-  }
-
-  if (message.type === "get-events") {
-    getEvents(message.limit || 100, message.offset || 0).then((events) => {
-      sendResponse({ events });
-    });
-    return true;
-  }
-
-  if (message.type === "get-rules") {
-    getRules().then((rules) => {
-      sendResponse({ rules });
-    });
-    return true;
-  }
-
-  if (message.type === "save-rules") {
-    saveRules(message.rules).then(() => {
-      syncDnrRules();
-      broadcastRulesChanged();
-      sendResponse({ ok: true });
-    });
-    return true;
-  }
-
-  if (message.type === "add-rule") {
-    getRules().then((rules) => {
-      const newRule = {
-        ...message.rule,
-        id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        type: "custom",
-      };
-      rules.unshift(newRule);
-      return saveRules(rules).then(() => {
-        syncDnrRules();
-        broadcastRulesChanged();
-        sendResponse({ ok: true, rule: newRule });
-      });
-    });
-    return true;
-  }
-
-  if (message.type === "delete-rule") {
-    getRules().then((rules) => {
-      const filtered = rules.filter((r) => r.id !== message.ruleId);
-      return saveRules(filtered).then(() => {
-        syncDnrRules();
-        broadcastRulesChanged();
-        sendResponse({ ok: true });
-      });
-    });
-    return true;
-  }
-
-  if (message.type === "clear-events") {
-    clearEvents().then(() => {
-      sendResponse({ ok: true });
-    });
-    return true;
-  }
-
-  if (message.type === "get-status") {
-    const activeTabs = Array.from(agentTabs.entries()).map(([id, info]) => ({
-      tabId: id,
-      ...info,
-      inGracePeriod: removalTimers.has(id),
-    }));
-    sendResponse({ activeTabs, agentTabCount: activeTabs.length });
-    return;
+    case 'agent-off':
+      if (sender.tab && sender.tab.id) {
+        agentTabs.delete(sender.tab.id);
+        chrome.action.setIcon({
+          path: { 16: 'icons/icon16.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' },
+          tabId: sender.tab.id
+        }).catch(function () {});
+        chrome.action.setBadgeText({ text: '', tabId: sender.tab.id }).catch(function () {});
+      }
+      return false;
   }
 });
-
-async function broadcastRulesChanged() {
-  const tabs = await chrome.tabs.query({});
-  for (const tab of tabs) {
-    if (agentTabs.has(tab.id)) {
-      chrome.tabs.sendMessage(tab.id, { type: "rules-changed" }).catch(() => {});
-    }
-  }
-}
-
-// --- Grace period for agent removal ---
-
-function scheduleRemoval(tabId) {
-  if (removalTimers.has(tabId)) return;
-
-  const info = agentTabs.get(tabId);
-  console.log(`[Guardian] Agent div removed on tab ${tabId}, grace period ${GRACE_PERIOD_MS / 1000}s started`);
-
-  if (info) {
-    info.gracePeriodStart = Date.now();
-  }
-
-  const timer = setTimeout(() => {
-    removalTimers.delete(tabId);
-    agentTabs.delete(tabId);
-    setAgentTab(tabId, false);
-    updateBadge(tabId, false);
-    syncDnrRules();
-    chrome.tabs.sendMessage(tabId, { type: "force-deactivate" }).catch(() => {});
-    console.log(`[Guardian] Grace period expired, tab ${tabId} no longer monitored`);
-  }, GRACE_PERIOD_MS);
-
-  removalTimers.set(tabId, timer);
-}
-
-function cancelRemoval(tabId) {
-  if (removalTimers.has(tabId)) {
-    clearTimeout(removalTimers.get(tabId));
-    removalTimers.delete(tabId);
-  }
-}
-
-// --- Tab lifecycle ---
-
-chrome.tabs.onRemoved.addListener((tabId) => {
-  cancelRemoval(tabId);
-  if (agentTabs.has(tabId)) {
-    agentTabs.delete(tabId);
-    setAgentTab(tabId, false);
-    syncDnrRules();
-  }
-});
-
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === "loading" && agentTabs.has(tabId)) {
-    cancelRemoval(tabId);
-    agentTabs.delete(tabId);
-    setAgentTab(tabId, false);
-    updateBadge(tabId, false);
-    syncDnrRules();
-  }
-});
-
-function updateBadge(tabId, isAgent) {
-  if (isAgent) {
-    chrome.action.setIcon({
-      path: { "16": "icons/icon16-active.png", "48": "icons/icon48-active.png", "128": "icons/icon128-active.png" },
-      tabId,
-    });
-    chrome.action.setBadgeText({ text: "ON", tabId });
-    chrome.action.setBadgeBackgroundColor({ color: "#ef4444", tabId });
-    chrome.action.setTitle({ title: "Webrix Guard — ACTIVE (monitoring agent)", tabId });
-  } else {
-    chrome.action.setIcon({
-      path: { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
-      tabId,
-    });
-    chrome.action.setBadgeText({ text: "", tabId });
-    chrome.action.setTitle({ title: "Webrix Guard", tabId });
-  }
-}

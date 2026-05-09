@@ -1,64 +1,103 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Webrix Guard</title>
+  <meta charset="utf-8">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <div class="popup">
-    <header class="header">
-      <div class="logo">
-        <svg width="22" height="22" viewBox="-2 12 160 116" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M38.9447 15.616H14.8309C14.5546 15.616 14.2978 15.7631 14.1603 16.0033L2.10412 36.8865C1.96529 37.1267 1.96529 37.4224 2.10412 37.6612L14.1603 58.5443C14.2992 58.7845 14.5546 58.9317 14.8309 58.9317H38.9447C39.221 58.9317 39.4778 58.7845 39.6152 58.5443L51.6714 37.6612C51.8103 37.421 51.8103 37.1253 51.6714 36.8865L39.6152 16.0033C39.4764 15.7631 39.221 15.616 38.9447 15.616Z" stroke="currentColor" stroke-width="3" stroke-miterlimit="10"/>
-          <path d="M26.9579 37.2044L14.3936 15.7548" stroke="currentColor" stroke-width="3" stroke-miterlimit="10"/>
-          <path d="M27.0269 37.2042H51.739" stroke="currentColor" stroke-width="3" stroke-miterlimit="10"/>
-          <path d="M14.4629 58.8621L26.9578 37.2042" stroke="currentColor" stroke-width="3" stroke-miterlimit="10"/>
-          <path d="M74.3724 15.9216L86.6466 36.8327L42.9504 112.492H67.8571L111.405 37.428L99.1313 15.9216H74.3724Z" fill="currentColor"/>
-          <path d="M111.37 37.6615L68.2155 112.412C68.0767 112.652 67.8212 112.799 67.5436 112.799H43.4312C43.3048 112.799 43.1826 112.768 43.073 112.71C42.9439 112.645 42.8342 112.542 42.7592 112.412L30.703 91.5285C30.5642 91.2883 30.5642 90.994 30.703 90.7538L73.8577 16.0037C73.9965 15.7635 74.2519 15.6163 74.5296 15.6163H98.642C98.9197 15.6163 99.1751 15.7635 99.314 16.0037L111.37 36.8868C111.509 37.127 111.509 37.4213 111.37 37.6615Z" stroke="currentColor" stroke-width="3" stroke-miterlimit="10"/>
-          <path d="M117.908 15.9216L130.237 36.8327L86.3459 112.492H111.731L155.107 37.428L142.778 15.9216H117.908Z" fill="currentColor"/>
-          <path d="M154.964 37.6613L111.809 112.411C111.67 112.652 111.415 112.799 111.137 112.799H87.0247C86.8983 112.799 86.7762 112.768 86.6665 112.71C86.5374 112.645 86.4277 112.542 86.3527 112.411L74.2965 91.5282C74.1577 91.2881 74.1577 90.9937 74.2965 90.7536L117.451 16.0034C117.59 15.7633 117.845 15.6161 118.123 15.6161H142.236C142.513 15.6161 142.769 15.7633 142.907 16.0034L154.964 36.8866C155.102 37.1268 155.102 37.4211 154.964 37.6613Z" stroke="currentColor" stroke-width="3" stroke-miterlimit="10"/>
+  <header>
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      </svg>
+      <span>Claude Guard</span>
+    </div>
+    <span class="badge" id="statusBadge">Inactive</span>
+  </header>
+
+  <section class="setting">
+    <div class="setting-info">
+      <div class="setting-label">Auto Mode</div>
+      <div class="setting-desc">Block non-GET requests with auth headers</div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="autoMode">
+      <span class="slider"></span>
+    </label>
+  </section>
+
+  <hr>
+
+  <section class="list-section">
+    <div class="list-head">
+      <h3>Allow List <span class="count" id="allowCount">0</span></h3>
+      <button class="icon-btn" id="addAllow" title="Add allow rule">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M12 5v14M5 12h14"/>
         </svg>
-        <h1>Webrix Guard</h1>
-      </div>
-      <span class="version">v1.0.0</span>
-    </header>
-
-    <div class="status-bar" id="statusBar">
-      <span class="status-dot"></span>
-      <span class="status-text" id="statusText">Scanning...</span>
-    </div>
-
-    <div class="stats">
-      <div class="stat">
-        <span class="stat-value" id="blockedCount">0</span>
-        <span class="stat-label">Blocked</span>
-      </div>
-      <div class="stat">
-        <span class="stat-value" id="allowedCount">0</span>
-        <span class="stat-label">Allowed</span>
-      </div>
-      <div class="stat">
-        <span class="stat-value" id="totalCount">0</span>
-        <span class="stat-label">Total</span>
-      </div>
-    </div>
-
-    <div class="recent-section">
-      <h2>Recent Activity</h2>
-      <div class="events-list" id="eventsList">
-        <div class="empty-state">No events yet</div>
-      </div>
-    </div>
-
-    <div class="actions">
-      <button class="btn btn-primary" id="openDashboard">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-        Open Dashboard
       </button>
     </div>
-  </div>
+    <div class="add-form" id="allowForm" hidden>
+      <input type="text" id="allowPattern" placeholder="*://api.example.com/*" spellcheck="false">
+      <select id="allowMethod">
+        <option value="*">All Methods</option>
+        <option value="POST">POST</option>
+        <option value="PUT">PUT</option>
+        <option value="PATCH">PATCH</option>
+        <option value="DELETE">DELETE</option>
+      </select>
+      <div class="form-btns">
+        <button class="btn-text" data-cancel="allow">Cancel</button>
+        <button class="btn-sm" data-confirm="allow">Add</button>
+      </div>
+    </div>
+    <div class="rules" id="allowList"></div>
+  </section>
+
+  <hr>
+
+  <section class="list-section">
+    <div class="list-head">
+      <h3>Block List <span class="count" id="blockCount">0</span></h3>
+      <button class="icon-btn" id="addBlock" title="Add block rule">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+      </button>
+    </div>
+    <div class="add-form" id="blockForm" hidden>
+      <input type="text" id="blockPattern" placeholder="*://evil.example.com/*" spellcheck="false">
+      <select id="blockMethod">
+        <option value="*">All Methods</option>
+        <option value="GET">GET</option>
+        <option value="POST">POST</option>
+        <option value="PUT">PUT</option>
+        <option value="PATCH">PATCH</option>
+        <option value="DELETE">DELETE</option>
+      </select>
+      <div class="form-btns">
+        <button class="btn-text" data-cancel="block">Cancel</button>
+        <button class="btn-sm" data-confirm="block">Add</button>
+      </div>
+    </div>
+    <div class="rules" id="blockList"></div>
+  </section>
+
+  <hr>
+
+  <footer>
+    <div class="stats">
+      <div class="stat">
+        <span class="num" id="blockedNum">0</span>
+        <span class="lbl">blocked</span>
+      </div>
+      <div class="stat">
+        <span class="num" id="allowedNum">0</span>
+        <span class="lbl">allowed</span>
+      </div>
+    </div>
+    <button class="btn-text btn-reset" id="clearStats">Reset</button>
+  </footer>
 
   <script src="popup.js"></script>
 </body>
