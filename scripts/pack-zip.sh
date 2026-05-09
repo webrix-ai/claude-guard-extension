@@ -18,6 +18,9 @@ zip -r "$DIST_DIR/$ZIP_NAME" \
   popup.html \
   popup.css \
   popup.js \
+  approve.html \
+  approve.css \
+  approve.js \
   icons/
 
 echo "Packed $DIST_DIR/$ZIP_NAME"

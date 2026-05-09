@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Claude Guard</title>
+  <link rel="stylesheet" href="approve.css">
+</head>
+<body>
+  <div class="chrome-titlebar">
+    <div class="brand">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      </svg>
+      <span>Claude Guard</span>
+    </div>
+    <span class="pill" id="count" hidden>0 pending</span>
+  </div>
+
+  <div class="body" id="list">
+    <div class="empty-state" id="empty">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.25">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      </svg>
+      <p>No pending requests</p>
+    </div>
+  </div>
+
+  <script src="approve.js"></script>
+</body>
+</html>
