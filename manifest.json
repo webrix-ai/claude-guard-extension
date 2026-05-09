@@ -1,19 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Claude Guard",
-  "version": "1.0.0",
-  "description": "Monitors and controls API calls made by Claude browser agents — approve, block, or log HTTP requests based on configurable rules.",
+  "version": "1.1.0",
+  "description": "Lightweight request guardian for Claude browser agents. Monitors, blocks, and approves HTTP requests in real-time.",
   "permissions": [
-    "webRequest",
-    "declarativeNetRequest",
-    "declarativeNetRequestFeedback",
-    "storage",
-    "tabs",
-    "activeTab"
-  ],
-  "host_permissions": [
-    "https://*/*",
-    "http://*/*"
+    "storage"
   ],
   "background": {
     "service_worker": "background.js"
@@ -43,11 +34,5 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": ["dashboard.html", "FullLogoW.svg", "FullLogoB.svg"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  }
 }

@@ -1,109 +1,137 @@
-document.addEventListener("DOMContentLoaded", () => {
-  loadStatus();
-  loadEvents();
+(function () {
+  'use strict';
 
-  document.getElementById("openDashboard").addEventListener("click", () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
-  });
+  var $ = function (id) { return document.getElementById(id); };
+  var state = null;
 
-  chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.type === "new-event") {
-      loadEvents();
-    }
-  });
-});
-
-async function loadStatus() {
-  try {
-    const response = await chrome.runtime.sendMessage({ type: "get-status" });
-    const bar = document.getElementById("statusBar");
-    const text = document.getElementById("statusText");
-
-    if (response.agentTabCount > 0) {
-      bar.classList.add("active");
-      text.textContent = `Monitoring ${response.agentTabCount} agent tab${response.agentTabCount > 1 ? "s" : ""}`;
-    } else {
-      bar.classList.remove("active");
-      text.textContent = "No active agent tabs detected";
-    }
-  } catch {
-    document.getElementById("statusText").textContent = "Extension ready";
+  function load() {
+    chrome.runtime.sendMessage({ type: 'get-state' }).then(function (s) {
+      state = s;
+      chrome.tabs.query({ active: true, currentWindow: true }).then(function (tabs) {
+        var tabId = tabs[0] && tabs[0].id;
+        if (tabId) {
+          chrome.runtime.sendMessage({ type: 'get-tab-status', tabId: tabId }).then(function (res) {
+            render(res && res.agentActive);
+          });
+        } else {
+          render(false);
+        }
+      });
+    });
   }
-}
 
-async function loadEvents() {
-  try {
-    const response = await chrome.runtime.sendMessage({
-      type: "get-events",
-      limit: 50,
-    });
+  function render(isAgentActive) {
+    if (!state) return;
 
-    const events = response.events || [];
-    const list = document.getElementById("eventsList");
+    $('autoMode').checked = state.autoMode;
+    $('blockedNum').textContent = state.stats ? state.stats.blocked : 0;
+    $('allowedNum').textContent = state.stats ? state.stats.allowed : 0;
 
-    let blocked = 0;
-    let allowed = 0;
-    events.forEach((e) => {
-      if (e.action === "block") blocked++;
-      else allowed++;
-    });
+    var badge = $('statusBadge');
+    badge.textContent = isAgentActive ? 'Active' : 'Inactive';
+    badge.className = 'badge' + (isAgentActive ? ' active' : '');
 
-    document.getElementById("blockedCount").textContent = blocked;
-    document.getElementById("allowedCount").textContent = allowed;
-    document.getElementById("totalCount").textContent = events.length;
+    renderList('allow', state.allowList || []);
+    renderList('block', state.blockList || []);
+  }
 
-    if (events.length === 0) {
-      list.innerHTML = '<div class="empty-state">No events yet</div>';
+  function renderList(type, rules) {
+    var el = $(type + 'List');
+    $(type + 'Count').textContent = rules.length;
+
+    if (!rules.length) {
+      el.innerHTML = '<div class="empty">No rules</div>';
       return;
     }
 
-    const recent = events.slice(0, 15);
-    list.innerHTML = recent
-      .map((e) => {
-        const urlObj = tryParseUrl(e.url);
-        const short = urlObj
-          ? urlObj.pathname + urlObj.search
-          : e.url;
-        return `
-        <div class="event-item">
-          <span class="event-method method-${e.method}">${e.method}</span>
-          <span class="event-url" title="${escapeHtml(e.url)}">${escapeHtml(short)}</span>
-          <span class="event-action action-${e.action}">${e.action}</span>
-          <button class="event-rule-btn" data-url="${escapeAttr(e.url)}" data-method="${e.method}" data-page-url="${escapeAttr(e.pageUrl || e.tabUrl || "")}" title="Create rule from this event">+</button>
-        </div>`;
-      })
-      .join("");
+    el.innerHTML = rules.map(function (r, i) {
+      return [
+        '<div class="rule">',
+        '  <span class="method">' + esc(r.method || '*') + '</span>',
+        '  <span class="pattern" title="' + esc(r.pattern || '*') + '">' + esc(r.pattern || '*') + '</span>',
+        '  <button class="remove" data-type="' + type + '" data-index="' + i + '" title="Remove">',
+        '    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>',
+        '  </button>',
+        '</div>'
+      ].join('');
+    }).join('');
+  }
 
-    list.querySelectorAll(".event-rule-btn").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const url = btn.dataset.url;
-        const method = btn.dataset.method;
-        const pageUrl = btn.dataset.pageUrl;
-        chrome.tabs.create({
-          url: chrome.runtime.getURL(`dashboard.html?createRule=1&url=${encodeURIComponent(url)}&method=${method}&pageUrl=${encodeURIComponent(pageUrl)}`),
-        });
+  function esc(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+  // Auto mode toggle
+  $('autoMode').addEventListener('change', function (e) {
+    chrome.runtime.sendMessage({ type: 'set-auto-mode', enabled: e.target.checked }).then(load);
+  });
+
+  // Add rule form toggles
+  ['allow', 'block'].forEach(function (type) {
+    $('add' + cap(type)).addEventListener('click', function () {
+      $(type + 'Form').hidden = false;
+      $(type + 'Pattern').focus();
+    });
+  });
+
+  // Cancel buttons
+  document.querySelectorAll('[data-cancel]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var type = btn.getAttribute('data-cancel');
+      $(type + 'Form').hidden = true;
+      $(type + 'Pattern').value = '';
+    });
+  });
+
+  // Confirm buttons
+  document.querySelectorAll('[data-confirm]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var type = btn.getAttribute('data-confirm');
+      var pattern = $(type + 'Pattern').value.trim();
+      var method = $(type + 'Method').value;
+      if (!pattern) { $(type + 'Pattern').focus(); return; }
+      chrome.runtime.sendMessage({
+        type: 'add-rule',
+        list: type,
+        rule: { pattern: pattern, method: method }
+      }).then(function () {
+        $(type + 'Form').hidden = true;
+        $(type + 'Pattern').value = '';
+        $(type + 'Method').value = '*';
+        load();
       });
     });
-  } catch {
-    // popup may open before background is ready
-  }
-}
+  });
 
-function tryParseUrl(url) {
-  try {
-    return new URL(url);
-  } catch {
-    return null;
-  }
-}
+  // Enter key to submit forms
+  ['allow', 'block'].forEach(function (type) {
+    $(type + 'Pattern').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        document.querySelector('[data-confirm="' + type + '"]').click();
+      }
+    });
+  });
 
-function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
-}
+  // Remove rules (event delegation)
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('.remove[data-type]');
+    if (!btn) return;
+    chrome.runtime.sendMessage({
+      type: 'remove-rule',
+      list: btn.getAttribute('data-type'),
+      index: parseInt(btn.getAttribute('data-index'), 10)
+    }).then(load);
+  });
 
-function escapeAttr(str) {
-  return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
+  // Clear stats
+  $('clearStats').addEventListener('click', function () {
+    chrome.runtime.sendMessage({ type: 'clear-stats' }).then(load);
+  });
+
+  // Auto-refresh when storage changes
+  chrome.storage.onChanged.addListener(load);
+
+  load();
+})();
