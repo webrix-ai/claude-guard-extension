@@ -1,4 +1,31 @@
 var agentTabs = new Set();
+
+function matchRule(rule, url) {
+  if (rule.method && rule.method !== '*' && rule.method.toUpperCase() !== 'GET') return false;
+  if (!rule.pattern || rule.pattern === '*') return true;
+  try {
+    var re = new RegExp('^' + rule.pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$', 'i');
+    return re.test(url);
+  } catch (e) { return false; }
+}
+
+function isUrlBlocked(blockList, url) {
+  return blockList.some(function (rule) { return matchRule(rule, url); });
+}
+
+chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
+  if (changeInfo.status !== 'loading') return;
+  if (!agentTabs.has(tabId)) return;
+  var url = tab.url || changeInfo.url;
+  if (!url || url.startsWith('chrome-extension://') || url.startsWith('chrome://')) return;
+  getState().then(function (state) {
+    if (isUrlBlocked(state.blockList, url)) {
+      chrome.tabs.update(tabId, {
+        url: chrome.runtime.getURL('blocked.html') + '?url=' + encodeURIComponent(url)
+      }).catch(function () {});
+    }
+  });
+});
 var approvePort = null;
 var approveWindowId = null;
 var pendingApprovals = new Map();
