@@ -220,6 +220,29 @@
     return _beacon(url, data);
   } : null;
 
+  // -- Page navigation block --
+
+  function blockedPageHTML(url) {
+    var safe = url.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8f8f8;color:#222;text-align:center;padding:40px;box-sizing:border-box">'
+      + '<svg width="64" height="64" viewBox="0 0 64 64" fill="none" style="margin-bottom:24px">'
+      + '<circle cx="32" cy="32" r="32" fill="#ff3b30" opacity=".12"/>'
+      + '<path d="M32 18v16M32 42v2" stroke="#ff3b30" stroke-width="3" stroke-linecap="round"/>'
+      + '</svg>'
+      + '<h1 style="font-size:28px;font-weight:700;margin:0 0 12px">Blocked by Claude Guard</h1>'
+      + '<p style="font-size:16px;color:#666;margin:0 0 16px">Navigation to this URL is not allowed.</p>'
+      + '<code style="font-size:13px;background:#eee;padding:6px 12px;border-radius:6px;word-break:break-all;max-width:600px;display:inline-block">' + safe + '</code>'
+      + '</div>';
+  }
+
+  function checkCurrentPage() {
+    var url = window.location.href;
+    if (verdict('GET', url, false) === 'block') {
+      log('GET', url, 'block');
+      document.documentElement.innerHTML = '<head><meta charset="utf-8"><title>Blocked by Claude Guard</title></head><body style="margin:0">' + blockedPageHTML(url) + '</body>';
+    }
+  }
+
   // -- Install / Uninstall --
 
   function install() {
@@ -233,6 +256,7 @@
     if (formReqSubmitOverride) HTMLFormElement.prototype.requestSubmit = formReqSubmitOverride;
     document.addEventListener('submit', submitHandler, true);
     if (beaconOverride) navigator.sendBeacon = beaconOverride;
+    checkCurrentPage();
   }
 
   function uninstall() {
