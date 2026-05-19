@@ -4,7 +4,8 @@
   "version": "1.1.0",
   "description": "Lightweight request guardian for Claude browser agents. Monitors, blocks, and approves HTTP requests in real-time.",
   "permissions": [
-    "storage"
+    "storage",
+    "tabs"
   ],
   "storage": {
     "managed_schema": "managed_schema.json"
