@@ -1,4 +1,31 @@
 var agentTabs = new Set();
+var agentGroups = new Map(); // groupId -> main agent tabId
+
+function activateTab(tabId) {
+  agentTabs.add(tabId);
+  chrome.action.setIcon({
+    path: { 16: 'icons/icon16-active.png', 48: 'icons/icon48-active.png', 128: 'icons/icon128-active.png' },
+    tabId: tabId
+  }).catch(function () {});
+  chrome.action.setBadgeText({ text: 'ON', tabId: tabId }).catch(function () {});
+  chrome.action.setBadgeBackgroundColor({ color: '#22c55e', tabId: tabId }).catch(function () {});
+}
+
+function deactivateTab(tabId) {
+  agentTabs.delete(tabId);
+  chrome.action.setIcon({
+    path: { 16: 'icons/icon16.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' },
+    tabId: tabId
+  }).catch(function () {});
+  chrome.action.setBadgeText({ text: '', tabId: tabId }).catch(function () {});
+}
+
+chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
+  if (changeInfo.groupId !== undefined && changeInfo.groupId >= 0 && agentGroups.has(changeInfo.groupId)) {
+    activateTab(tabId);
+    chrome.tabs.sendMessage(tabId, { type: 'group-agent-on' }).catch(function () {});
+  }
+});
 var approvePort = null;
 var approveWindowId = null;
 var pendingApprovals = new Map();
@@ -11,27 +38,9 @@ var DEFAULT_STATE = {
   log: []
 };
 
-function getManagedRules() {
-  return chrome.storage.managed.get(['allowList', 'blockList']).then(function (managed) {
-    return {
-      allowList: (managed.allowList || []).map(function (r) { return Object.assign({}, r, { managed: true }); }),
-      blockList: (managed.blockList || []).map(function (r) { return Object.assign({}, r, { managed: true }); })
-    };
-  }).catch(function () {
-    return { allowList: [], blockList: [] };
-  });
-}
-
 function getState() {
-  return Promise.all([
-    chrome.storage.local.get('cg'),
-    getManagedRules()
-  ]).then(function (results) {
-    var local = Object.assign({}, DEFAULT_STATE, results[0].cg);
-    var managed = results[1];
-    local.allowList = managed.allowList.concat(local.allowList);
-    local.blockList = managed.blockList.concat(local.blockList);
-    return local;
+  return chrome.storage.local.get('cg').then(function (data) {
+    return Object.assign({}, DEFAULT_STATE, data.cg);
   });
 }
 
@@ -55,6 +64,9 @@ chrome.runtime.onInstalled.addListener(function () {
 
 chrome.tabs.onRemoved.addListener(function (tabId) {
   agentTabs.delete(tabId);
+  agentGroups.forEach(function (mainId, groupId) {
+    if (mainId === tabId) agentGroups.delete(groupId);
+  });
 });
 
 // --------------- Approval Window ---------------
@@ -247,25 +259,44 @@ chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
 
     case 'agent-on':
       if (sender.tab && sender.tab.id) {
-        agentTabs.add(sender.tab.id);
-        chrome.action.setIcon({
-          path: { 16: 'icons/icon16-active.png', 48: 'icons/icon48-active.png', 128: 'icons/icon128-active.png' },
-          tabId: sender.tab.id
-        }).catch(function () {});
-        chrome.action.setBadgeText({ text: 'ON', tabId: sender.tab.id }).catch(function () {});
-        chrome.action.setBadgeBackgroundColor({ color: '#22c55e', tabId: sender.tab.id }).catch(function () {});
+        var mainTabId = sender.tab.id;
+        activateTab(mainTabId);
+        var groupId = sender.tab.groupId;
+        if (groupId !== undefined && groupId >= 0) {
+          agentGroups.set(groupId, mainTabId);
+          chrome.tabs.query({ groupId: groupId }).then(function (tabs) {
+            tabs.forEach(function (t) {
+              if (t.id !== mainTabId) {
+                activateTab(t.id);
+                chrome.tabs.sendMessage(t.id, { type: 'group-agent-on' }).catch(function () {});
+              }
+            });
+          }).catch(function () {});
+        }
       }
       return false;
 
     case 'agent-off':
       if (sender.tab && sender.tab.id) {
-        agentTabs.delete(sender.tab.id);
-        chrome.action.setIcon({
-          path: { 16: 'icons/icon16.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' },
-          tabId: sender.tab.id
-        }).catch(function () {});
-        chrome.action.setBadgeText({ text: '', tabId: sender.tab.id }).catch(function () {});
+        var offTabId = sender.tab.id;
+        var offGroupId = sender.tab.groupId;
+        if (offGroupId !== undefined && offGroupId >= 0 && agentGroups.get(offGroupId) === offTabId) {
+          agentGroups.delete(offGroupId);
+          chrome.tabs.query({ groupId: offGroupId }).then(function (tabs) {
+            tabs.forEach(function (t) {
+              if (t.id !== offTabId) {
+                deactivateTab(t.id);
+                chrome.tabs.sendMessage(t.id, { type: 'group-agent-off' }).catch(function () {});
+              }
+            });
+          }).catch(function () {});
+        }
+        deactivateTab(offTabId);
       }
+      return false;
+
+    case 'check-agent-status':
+      reply({ agentActive: sender.tab ? agentTabs.has(sender.tab.id) : false });
       return false;
   }
 });
