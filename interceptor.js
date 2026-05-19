@@ -1,10 +1,12 @@
 (function () {
   'use strict';
 
-  let active = false, autoMode = true, allowList = [], blockList = [];
+  let autoMode = true, allowList = [], blockList = [];
   const pending = new Map();
   let rid = 0;
+  let installed = false;
 
+  // -- Originals --
   const _fetch = window.fetch;
   const _xhrOpen = XMLHttpRequest.prototype.open;
   const _xhrSend = XMLHttpRequest.prototype.send;
@@ -101,29 +103,9 @@
     });
   }
 
-  window.addEventListener('message', function (e) {
-    var d = e.data;
-    if (!d || d.source !== 'cg-cs') return;
-    if (d.type === 'activate') {
-      active = true;
-      allowList = d.allow || [];
-      blockList = d.block || [];
-      autoMode = d.auto !== false;
-    } else if (d.type === 'deactivate') {
-      active = false;
-    } else if (d.type === 'update') {
-      if (d.allow) allowList = d.allow;
-      if (d.block) blockList = d.block;
-      if (d.auto !== undefined) autoMode = d.auto;
-    } else if (d.type === 'decision') {
-      var r = pending.get(d.id);
-      if (r) { pending.delete(d.id); r(d.action); }
-    }
-  });
+  // -- Overrides (defined once) --
 
-  // -- fetch --
-  window.fetch = function (input, init) {
-    if (!active) return _fetch.apply(this, arguments);
+  const fetchOverride = function (input, init) {
     var req = input instanceof Request ? input : null;
     var url = req ? req.url : String(input);
     var method = ((init && init.method) || (req && req.method) || 'GET').toUpperCase();
@@ -152,13 +134,12 @@
     });
   };
 
-  // -- XMLHttpRequest --
-  XMLHttpRequest.prototype.open = function (m, u) {
+  const xhrOpenOverride = function (m, u) {
     this._cg = { m: (m || 'GET').toUpperCase(), u: String(u), a: false, h: [] };
     return _xhrOpen.apply(this, arguments);
   };
 
-  XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
+  const xhrSetHeaderOverride = function (name, value) {
     if (this._cg) {
       if (/^authorization$/i.test(name)) this._cg.a = true;
       this._cg.h.push([name, value]);
@@ -166,8 +147,8 @@
     return _xhrSetHeader.apply(this, arguments);
   };
 
-  XMLHttpRequest.prototype.send = function (body) {
-    if (!active || !this._cg) return _xhrSend.apply(this, arguments);
+  const xhrSendOverride = function (body) {
+    if (!this._cg) return _xhrSend.apply(this, arguments);
     var info = this._cg;
     if (verdict(info.m, info.u, info.a) === 'allow') {
       log(info.m, info.u, 'allow');
@@ -196,9 +177,8 @@
     });
   };
 
-  // -- Form submit / requestSubmit --
-  HTMLFormElement.prototype.submit = function () {
-    if (!active || formPass.has(this)) { formPass.delete(this); return _formSubmit.call(this); }
+  const formSubmitOverride = function () {
+    if (formPass.has(this)) { formPass.delete(this); return _formSubmit.call(this); }
     var m = (this.method || 'GET').toUpperCase(), u = this.action || location.href;
     if (verdict(m, u, false) === 'allow') { log(m, u, 'allow'); return _formSubmit.call(this); }
     var f = this;
@@ -208,22 +188,19 @@
     });
   };
 
-  if (_formReqSubmit) {
-    HTMLFormElement.prototype.requestSubmit = function (sub) {
-      if (!active || formPass.has(this)) { formPass.delete(this); return _formReqSubmit.call(this, sub); }
-      var m = (this.method || 'GET').toUpperCase(), u = this.action || location.href;
-      if (verdict(m, u, false) === 'allow') { log(m, u, 'allow'); return _formReqSubmit.call(this, sub); }
-      var f = this;
-      ask(m, u, 'Form submission').then(function (act) {
-        log(m, u, act === 'deny' ? 'block' : 'allow');
-        if (act !== 'deny') { formPass.add(f); f.requestSubmit(sub); }
-      });
-    };
-  }
+  const formReqSubmitOverride = _formReqSubmit ? function (sub) {
+    if (formPass.has(this)) { formPass.delete(this); return _formReqSubmit.call(this, sub); }
+    var m = (this.method || 'GET').toUpperCase(), u = this.action || location.href;
+    if (verdict(m, u, false) === 'allow') { log(m, u, 'allow'); return _formReqSubmit.call(this, sub); }
+    var f = this;
+    ask(m, u, 'Form submission').then(function (act) {
+      log(m, u, act === 'deny' ? 'block' : 'allow');
+      if (act !== 'deny') { formPass.add(f); f.requestSubmit(sub); }
+    });
+  } : null;
 
-  // Capture-phase listener for button-triggered form submits
-  document.addEventListener('submit', function (e) {
-    if (!active || !(e.target instanceof HTMLFormElement)) return;
+  const submitHandler = function (e) {
+    if (!(e.target instanceof HTMLFormElement)) return;
     var f = e.target;
     if (formPass.has(f)) { formPass.delete(f); return; }
     var m = (f.method || 'GET').toUpperCase(), u = f.action || location.href;
@@ -234,16 +211,84 @@
       log(m, u, act === 'deny' ? 'block' : 'allow');
       if (act !== 'deny') { formPass.add(f); _formSubmit.call(f); }
     });
-  }, true);
+  };
 
-  // -- sendBeacon (synchronous check only, no approval popup) --
-  if (_beacon) {
-    navigator.sendBeacon = function (url, data) {
-      if (!active) return _beacon(url, data);
-      var u = String(url);
-      if (verdict('POST', u, false) !== 'allow') { log('POST', u, 'block'); return false; }
-      log('POST', u, 'allow');
-      return _beacon(url, data);
-    };
+  const beaconOverride = _beacon ? function (url, data) {
+    var u = String(url);
+    if (verdict('POST', u, false) !== 'allow') { log('POST', u, 'block'); return false; }
+    log('POST', u, 'allow');
+    return _beacon(url, data);
+  } : null;
+
+  // -- Page navigation block --
+
+  function blockedPageHTML(url) {
+    var safe = url.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f8f8f8;color:#222;text-align:center;padding:40px;box-sizing:border-box">'
+      + '<svg width="64" height="64" viewBox="0 0 64 64" fill="none" style="margin-bottom:24px">'
+      + '<circle cx="32" cy="32" r="32" fill="#ff3b30" opacity=".12"/>'
+      + '<path d="M32 18v16M32 42v2" stroke="#ff3b30" stroke-width="3" stroke-linecap="round"/>'
+      + '</svg>'
+      + '<h1 style="font-size:28px;font-weight:700;margin:0 0 12px">Blocked by Claude Guard</h1>'
+      + '<p style="font-size:16px;color:#666;margin:0 0 16px">Navigation to this URL is not allowed.</p>'
+      + '<code style="font-size:13px;background:#eee;padding:6px 12px;border-radius:6px;word-break:break-all;max-width:600px;display:inline-block">' + safe + '</code>'
+      + '</div>';
   }
+
+  function checkCurrentPage() {
+    var url = window.location.href;
+    if (verdict('GET', url, false) === 'block') {
+      log('GET', url, 'block');
+      document.documentElement.innerHTML = '<head><meta charset="utf-8"><title>Blocked by Claude Guard</title></head><body style="margin:0">' + blockedPageHTML(url) + '</body>';
+    }
+  }
+
+  // -- Install / Uninstall --
+
+  function install() {
+    if (installed) return;
+    installed = true;
+    window.fetch = fetchOverride;
+    XMLHttpRequest.prototype.open = xhrOpenOverride;
+    XMLHttpRequest.prototype.setRequestHeader = xhrSetHeaderOverride;
+    XMLHttpRequest.prototype.send = xhrSendOverride;
+    HTMLFormElement.prototype.submit = formSubmitOverride;
+    if (formReqSubmitOverride) HTMLFormElement.prototype.requestSubmit = formReqSubmitOverride;
+    document.addEventListener('submit', submitHandler, true);
+    if (beaconOverride) navigator.sendBeacon = beaconOverride;
+    checkCurrentPage();
+  }
+
+  function uninstall() {
+    if (!installed) return;
+    installed = false;
+    window.fetch = _fetch;
+    XMLHttpRequest.prototype.open = _xhrOpen;
+    XMLHttpRequest.prototype.setRequestHeader = _xhrSetHeader;
+    XMLHttpRequest.prototype.send = _xhrSend;
+    HTMLFormElement.prototype.submit = _formSubmit;
+    if (_formReqSubmit) HTMLFormElement.prototype.requestSubmit = _formReqSubmit;
+    document.removeEventListener('submit', submitHandler, true);
+    if (_beacon) navigator.sendBeacon = _beacon;
+  }
+
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (!d || d.source !== 'cg-cs') return;
+    if (d.type === 'activate') {
+      allowList = d.allow || [];
+      blockList = d.block || [];
+      autoMode = d.auto !== false;
+      install();
+    } else if (d.type === 'deactivate') {
+      uninstall();
+    } else if (d.type === 'update') {
+      if (d.allow) allowList = d.allow;
+      if (d.block) blockList = d.block;
+      if (d.auto !== undefined) autoMode = d.auto;
+    } else if (d.type === 'decision') {
+      var r = pending.get(d.id);
+      if (r) { pending.delete(d.id); r(d.action); }
+    }
+  });
 })();
