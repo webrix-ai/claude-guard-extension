@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "properties": {
+    "allowList": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pattern": { "type": "string" },
+          "method":  { "type": "string" }
+        }
+      }
+    },
+    "blockList": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pattern": { "type": "string" },
+          "method":  { "type": "string" }
+        }
+      }
+    }
+  }
+}

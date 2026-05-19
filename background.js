@@ -11,9 +11,27 @@ var DEFAULT_STATE = {
   log: []
 };
 
+function getManagedRules() {
+  return chrome.storage.managed.get(['allowList', 'blockList']).then(function (managed) {
+    return {
+      allowList: (managed.allowList || []).map(function (r) { return Object.assign({}, r, { managed: true }); }),
+      blockList: (managed.blockList || []).map(function (r) { return Object.assign({}, r, { managed: true }); })
+    };
+  }).catch(function () {
+    return { allowList: [], blockList: [] };
+  });
+}
+
 function getState() {
-  return chrome.storage.local.get('cg').then(function (data) {
-    return Object.assign({}, DEFAULT_STATE, data.cg);
+  return Promise.all([
+    chrome.storage.local.get('cg'),
+    getManagedRules()
+  ]).then(function (results) {
+    var local = Object.assign({}, DEFAULT_STATE, results[0].cg);
+    var managed = results[1];
+    local.allowList = managed.allowList.concat(local.allowList);
+    local.blockList = managed.blockList.concat(local.blockList);
+    return local;
   });
 }
 
