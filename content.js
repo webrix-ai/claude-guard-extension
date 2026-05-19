@@ -205,17 +205,7 @@
     }
   });
 
-  // --------------- MutationObserver for instant agent detection ---------------
+  // --------------- Poll (no MutationObserver — zero DOM overhead) ---------------
 
-  var observer = new MutationObserver(checkAgent);
-
-  function startObserving() {
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', startObserving);
-  } else {
-    startObserving();
-  }
+  setInterval(checkAgent, 2000);
 })();
