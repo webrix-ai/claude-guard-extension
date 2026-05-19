@@ -9,6 +9,14 @@
   var toastContainer = null;
   var originalTitle = '';
 
+  // If this tab is a group peer of an active agent tab, activate immediately
+  chrome.runtime.sendMessage({ type: 'check-agent-status' }).then(function (resp) {
+    if (resp && resp.agentActive && !agentActive) {
+      agentActive = true;
+      activate();
+    }
+  }).catch(function () {});
+
   // --------------- Agent Detection ---------------
 
   function checkAgent() {
@@ -135,6 +143,20 @@
   // --------------- Message Bridge ---------------
 
   chrome.runtime.onMessage.addListener(function (msg) {
+    if (msg.type === 'group-agent-on') {
+      if (!agentActive) {
+        agentActive = true;
+        activate();
+      }
+    }
+
+    if (msg.type === 'group-agent-off') {
+      if (agentActive) {
+        agentActive = false;
+        window.postMessage({ source: 'cg-cs', type: 'deactivate' }, '*');
+      }
+    }
+
     if (msg.type === 'rules-updated') {
       window.postMessage({
         source: 'cg-cs',
