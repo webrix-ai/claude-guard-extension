@@ -29,6 +29,12 @@ chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
 var approvePort = null;
 var approveWindowId = null;
 var pendingApprovals = new Map();
+var sidePanelPort = null;
+
+// Open side panel when extension icon is clicked
+chrome.action.onClicked.addListener(function (tab) {
+  chrome.sidePanel.open({ tabId: tab.id }).catch(function () {});
+});
 
 var DEFAULT_STATE = {
   allowList: [],
@@ -92,6 +98,10 @@ chrome.tabs.onRemoved.addListener(function (tabId) {
 function openApproveWindow(request) {
   pendingApprovals.set(request.id, request);
 
+  if (sidePanelPort) {
+    sidePanelPort.postMessage({ type: 'new-request', request: request });
+  }
+
   if (approvePort) {
     approvePort.postMessage({ type: 'new-request', request: request });
     if (approveWindowId != null) {
@@ -138,6 +148,28 @@ chrome.windows.onRemoved.addListener(function (windowId) {
 });
 
 chrome.runtime.onConnect.addListener(function (port) {
+  if (port.name === 'sidepanel') {
+    sidePanelPort = port;
+
+    port.onMessage.addListener(function (msg) {
+      if (msg.type === 'sp-ready') {
+        port.postMessage({
+          type: 'pending-requests',
+          requests: Array.from(pendingApprovals.values())
+        });
+      }
+
+      if (msg.type === 'sp-decision') {
+        resolveApproval(msg.id, msg.action);
+      }
+    });
+
+    port.onDisconnect.addListener(function () {
+      sidePanelPort = null;
+    });
+    return;
+  }
+
   if (port.name !== 'approve') return;
 
   approvePort = port;
@@ -151,35 +183,7 @@ chrome.runtime.onConnect.addListener(function (port) {
     }
 
     if (msg.type === 'decision') {
-      var req = pendingApprovals.get(msg.id);
-      if (!req) return;
-      pendingApprovals.delete(msg.id);
-
-      chrome.tabs.sendMessage(req.tabId, {
-        type: 'approval-decision', id: msg.id, action: msg.action,
-        method: req.method, url: req.url
-      }).catch(function () {});
-
-      if (msg.action === 'allow-always') {
-        try {
-          var hostname = new URL(req.url).hostname;
-          getState().then(function (s) {
-            var pattern = '*://' + hostname + '/*';
-            var exists = s.allowList.some(function (r) { return r.pattern === pattern; });
-            if (!exists) {
-              s.allowList.push({ pattern: pattern, method: '*' });
-              setState(s).then(function () {
-                broadcast({
-                  type: 'rules-updated',
-                  allowList: s.allowList,
-                  blockList: s.blockList,
-                  autoMode: s.autoMode
-                });
-              });
-            }
-          });
-        } catch (e) {}
-      }
+      resolveApproval(msg.id, msg.action);
 
       if (pendingApprovals.size === 0 && approveWindowId != null) {
         chrome.windows.remove(approveWindowId).catch(function () {});
@@ -194,6 +198,42 @@ chrome.runtime.onConnect.addListener(function (port) {
     denyAllPending();
   });
 });
+
+function resolveApproval(id, action) {
+  var req = pendingApprovals.get(id);
+  if (!req) return;
+  pendingApprovals.delete(id);
+
+  chrome.tabs.sendMessage(req.tabId, {
+    type: 'approval-decision', id: id, action: action,
+    method: req.method, url: req.url
+  }).catch(function () {});
+
+  if (sidePanelPort) {
+    sidePanelPort.postMessage({ type: 'request-resolved', id: id });
+  }
+
+  if (action === 'allow-always') {
+    try {
+      var hostname = new URL(req.url).hostname;
+      getState().then(function (s) {
+        var pattern = '*://' + hostname + '/*';
+        var exists = s.allowList.some(function (r) { return r.pattern === pattern; });
+        if (!exists) {
+          s.allowList.push({ pattern: pattern, method: '*' });
+          setState(s).then(function () {
+            broadcast({
+              type: 'rules-updated',
+              allowList: s.allowList,
+              blockList: s.blockList,
+              autoMode: s.autoMode
+            });
+          });
+        }
+      });
+    } catch (e) {}
+  }
+}
 
 // --------------- Main Message Handler ---------------
 

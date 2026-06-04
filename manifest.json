@@ -5,7 +5,8 @@
   "description": "Lightweight request guardian for Claude browser agents. Monitors, blocks, and approves HTTP requests in real-time.",
   "permissions": [
     "storage",
-    "tabs"
+    "tabs",
+    "sidePanel"
   ],
   "storage": {
     "managed_schema": "managed_schema.json"
@@ -26,8 +27,10 @@
       "run_at": "document_start"
     }
   ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
   "action": {
-    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

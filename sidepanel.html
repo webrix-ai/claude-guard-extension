@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      </svg>
+      <span>Claude Guard</span>
+    </div>
+    <span class="badge" id="statusBadge">Inactive</span>
+  </header>
+
+  <section class="setting">
+    <div class="setting-info">
+      <div class="setting-label">Auto Mode</div>
+      <div class="setting-desc">Block non-GET same-site or auth-header requests</div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="autoMode">
+      <span class="slider"></span>
+    </label>
+  </section>
+
+  <hr>
+
+  <section class="pending-section" id="pendingSection" hidden>
+    <div class="list-head">
+      <h3>Pending Approvals <span class="count pending-count" id="pendingCount">0</span></h3>
+    </div>
+    <div id="pendingList"></div>
+  </section>
+
+  <hr id="pendingHr" hidden>
+
+  <section class="list-section">
+    <div class="list-head">
+      <h3>Allow List <span class="count" id="allowCount">0</span></h3>
+      <button class="icon-btn" id="addAllow" title="Add allow rule">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+      </button>
+    </div>
+    <div class="add-form" id="allowForm" hidden>
+      <input type="text" id="allowPattern" placeholder="*://api.example.com/*" spellcheck="false">
+      <select id="allowMethod">
+        <option value="*">All Methods</option>
+        <option value="POST">POST</option>
+        <option value="PUT">PUT</option>
+        <option value="PATCH">PATCH</option>
+        <option value="DELETE">DELETE</option>
+      </select>
+      <div class="form-btns">
+        <button class="btn-text" data-cancel="allow">Cancel</button>
+        <button class="btn-sm" data-confirm="allow">Add</button>
+      </div>
+    </div>
+    <div class="rules" id="allowList"></div>
+  </section>
+
+  <hr>
+
+  <section class="list-section">
+    <div class="list-head">
+      <h3>Block List <span class="count" id="blockCount">0</span></h3>
+      <button class="icon-btn" id="addBlock" title="Add block rule">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+      </button>
+    </div>
+    <div class="add-form" id="blockForm" hidden>
+      <input type="text" id="blockPattern" placeholder="*://evil.example.com/*" spellcheck="false">
+      <select id="blockMethod">
+        <option value="*">All Methods</option>
+        <option value="GET">GET</option>
+        <option value="POST">POST</option>
+        <option value="PUT">PUT</option>
+        <option value="PATCH">PATCH</option>
+        <option value="DELETE">DELETE</option>
+      </select>
+      <div class="form-btns">
+        <button class="btn-text" data-cancel="block">Cancel</button>
+        <button class="btn-sm" data-confirm="block">Add</button>
+      </div>
+    </div>
+    <div class="rules" id="blockList"></div>
+  </section>
+
+  <hr>
+
+  <footer>
+    <div class="stats">
+      <div class="stat">
+        <span class="num" id="blockedNum">0</span>
+        <span class="lbl">blocked</span>
+      </div>
+      <div class="stat">
+        <span class="num" id="allowedNum">0</span>
+        <span class="lbl">allowed</span>
+      </div>
+    </div>
+    <button class="btn-text btn-reset" id="clearStats">Reset</button>
+  </footer>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>
