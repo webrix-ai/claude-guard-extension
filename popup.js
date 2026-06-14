@@ -45,13 +45,18 @@
     }
 
     el.innerHTML = rules.map(function (r, i) {
+      var action = r.managed
+        ? ''
+        : [
+            '  <button class="remove" data-type="' + type + '" data-index="' + i + '" title="Remove">',
+            '    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>',
+            '  </button>'
+          ].join('');
       return [
         '<div class="rule">',
         '  <span class="method">' + esc(r.method || '*') + '</span>',
         '  <span class="pattern" title="' + esc(r.pattern || '*') + '">' + esc(r.pattern || '*') + '</span>',
-        '  <button class="remove" data-type="' + type + '" data-index="' + i + '" title="Remove">',
-        '    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>',
-        '  </button>',
+        action,
         '</div>'
       ].join('');
     }).join('');
