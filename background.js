@@ -63,7 +63,13 @@ function getState() {
 }
 
 function setState(state) {
-  return chrome.storage.local.set({ cg: state });
+  // Managed (MDM/policy) rules live in chrome.storage.managed only —
+  // strip them so they are never persisted into local storage.
+  var local = Object.assign({}, state, {
+    allowList: state.allowList.filter(function (r) { return !r.managed; }),
+    blockList: state.blockList.filter(function (r) { return !r.managed; })
+  });
+  return chrome.storage.local.set({ cg: local });
 }
 
 function broadcast(msg) {
