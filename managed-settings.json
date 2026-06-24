@@ -1,0 +1,95 @@
+{
+    "permissions": {
+      "deny": [
+        "Read(./.env)",
+        "Read(./.env.*)",
+        "Read(./secrets/**)",
+        "Read(**/.ssh/**)",
+        "Read(/Users/*/.aws/credentials)",
+        "Read(/Users/*/.aws/config)",
+        "Read(**/credentials.json)",
+        "Read(**/service-account*.json)",
+        "WebFetch",
+        "WebSearch",
+        "Bash(curl *)",
+        "Bash(wget *)",
+        "Bash(nc *)",
+        "Bash(ncat *)",
+        "Bash(sudo *)",
+        "Bash(su *)",
+        "Bash(chmod *)",
+        "Bash(chown *)",
+        "Bash(git push *)",
+        "Bash(git push --force *)",
+        "Bash(scp *)",
+        "Bash(rsync *)",
+        "Read(**/.npmrc)",
+        "Read(**/.netrc)",
+        "Read(**/.pypirc)",
+        "Read(/Users/*/.kube/config)",
+        "Read(/Users/*/.docker/config.json)",
+        "Read(/Users/*/.config/gcloud/**)",
+        "Read(**/*.tfvars)",
+        "Read(**/terraform.tfstate)",
+        "Bash(rm -rf *)",
+        "Edit(.github/**)",
+        "Write(.github/**)",
+        "Edit(**/Dockerfile)",
+        "Edit(**/docker-compose*.yml)",
+        "Edit(**/*.tf)",
+        "Edit(**/Makefile)",
+        "Edit(**/.gitlab-ci.yml)",
+        "Bash(ssh *)",
+        "Bash(sftp *)",
+        "Bash(telnet *)",
+        "Bash(dig *)",
+        "Bash(nslookup *)",
+        "Bash(host *)",
+        "Bash(git pull *)",
+        "Bash(git fetch *)",
+        "Bash(git clone *)",
+        "Bash(git reset --hard *)",
+        "Bash(git clean -fd *)",
+        "Bash(git clean -fdx *)",
+        "Bash(git branch -D *)",
+        "Bash(git branch -d *)",
+        "Bash(gh *)",
+        "Bash(git push -f *)",
+        "Bash(git push --force-with-lease *)"
+      ],
+      "disableBypassPermissionsMode": "disable",
+      "ask": [
+        "Bash(git commit *)",
+        "Bash(git merge *)",
+        "Bash(git rebase *)"
+      ]
+    },
+    "allowedMcpServers": [
+      {
+        "serverUrl": "*"
+      }
+    ],
+    "allowManagedMcpServersOnly": true,
+    "forceLoginMethod": "claudeai",
+    "sandbox": {
+      "enabled": true,
+      "autoAllowBashIfSandboxed": false,
+      "failIfUnavailable": true
+    },
+    "viewMode": "verbose",
+    "showTurnDuration": true,
+    "showThinkingSummaries": true,
+    "terminalProgressBarEnabled": true,
+    "companyAnnouncements": [
+      "Claude Code is managed by your organization. Follow internal AI usage guidelines.",
+      "Questions? Reach out in your team's AI tools channel."
+    ],
+    "includeGitInstructions": true,
+    "attribution": {
+      "commit": "Co-Authored-By: Claude <noreply@anthropic.com>",
+      "pr": "Generated with Claude Code"
+    },
+    "prUrlTemplate": "https://github.com/{owner}/{repo}/pull/{pr_number}",
+    "language": "English",
+    "autoUpdatesChannel": "stable"
+  }
