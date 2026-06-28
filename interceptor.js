@@ -2,9 +2,15 @@
   'use strict';
 
   let autoMode = true, allowList = [], blockList = [];
+  let guardCfg = { enabled: false, messages: false, files: false };
   const pending = new Map();
+  const guardPending = new Map();
   let rid = 0;
   let installed = false;
+
+  // Caps for content sent to the guard evaluator.
+  const GUARD_MAX_CONTENT = 16000;
+  const GUARD_MAX_FILE_BYTES = 256 * 1024;
 
   // -- Originals --
   const _fetch = window.fetch;
@@ -103,7 +109,140 @@
     });
   }
 
+  // -- Org guard evaluation (Claude.ai message / file content) --
+
+  function guardBlockedResponse(method, url, reason) {
+    var body = JSON.stringify({
+      error: 'BLOCKED_BY_WILLOW_GUARD',
+      message: reason || 'This content was blocked by your organization\'s Willow security policy.',
+      blocked: true
+    });
+    return new Response(body, {
+      status: 403,
+      statusText: 'Blocked by Willow Guard',
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  function isClaudeHost() {
+    return /(^|\.)claude\.ai$/i.test(location.hostname);
+  }
+
+  // Returns the Claude hook event a request maps to, or null when it should not
+  // be guarded. Message sends -> UserPromptSubmit; file uploads -> PreToolUse.
+  function guardEventFor(method, url) {
+    if (!guardCfg.enabled || method !== 'POST' || !isClaudeHost()) return null;
+    var p;
+    try { p = new URL(url, location.href).pathname; } catch (e) { return null; }
+    if (guardCfg.messages && /\/(completion|retry_completion)$/.test(p)) return 'UserPromptSubmit';
+    if (guardCfg.files && /\/(files|upload)$/.test(p)) return 'PreToolUse';
+    return null;
+  }
+
+  function readBodyText(body) {
+    if (body == null) return Promise.resolve('');
+    if (typeof body === 'string') return Promise.resolve(body);
+    if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
+      return Promise.resolve(body.toString());
+    }
+    if (typeof Blob !== 'undefined' && body instanceof Blob) {
+      if (body.size > GUARD_MAX_FILE_BYTES) return Promise.resolve('');
+      return body.text().catch(function () { return ''; });
+    }
+    return Promise.resolve('');
+  }
+
+  function extractPrompt(j) {
+    if (!j || typeof j !== 'object') return '';
+    if (typeof j.prompt === 'string') return j.prompt;
+    if (Array.isArray(j.messages)) {
+      return j.messages.map(function (m) {
+        if (typeof m.content === 'string') return m.content;
+        if (Array.isArray(m.content)) {
+          return m.content.map(function (c) { return (c && (c.text || c.content)) || ''; }).join('\n');
+        }
+        return m.text || '';
+      }).join('\n');
+    }
+    if (typeof j.text === 'string') return j.text;
+    return '';
+  }
+
+  function captureFormContent(fd) {
+    var parts = [];
+    var filePromises = [];
+    fd.forEach(function (v, k) {
+      if (typeof v === 'string') {
+        parts.push(v);
+      } else if (v && typeof v.text === 'function') {
+        if (v.name) parts.push(v.name);
+        if (v.size && v.size <= GUARD_MAX_FILE_BYTES && /text|json|csv|xml|javascript|markdown|html|yaml/i.test(v.type || '')) {
+          filePromises.push(v.text().then(function (t) { parts.push(t); }).catch(function () {}));
+        }
+      }
+    });
+    return Promise.all(filePromises).then(function () {
+      return parts.join('\n').slice(0, GUARD_MAX_CONTENT);
+    });
+  }
+
+  function captureGuardContent(event, body, req) {
+    if (typeof FormData !== 'undefined' && body instanceof FormData) {
+      return captureFormContent(body);
+    }
+    var textPromise;
+    if (body == null && req && typeof req.clone === 'function') {
+      textPromise = req.clone().text().catch(function () { return ''; });
+    } else {
+      textPromise = readBodyText(body);
+    }
+    return textPromise.then(function (text) {
+      if (!text) return '';
+      if (event === 'UserPromptSubmit') {
+        try {
+          var c = extractPrompt(JSON.parse(text));
+          if (c) return c.slice(0, GUARD_MAX_CONTENT);
+        } catch (e) {}
+      }
+      return text.slice(0, GUARD_MAX_CONTENT);
+    });
+  }
+
+  function guardAsk(event, content, url) {
+    return new Promise(function (resolve) {
+      var id = 'g' + (++rid);
+      guardPending.set(id, resolve);
+      window.postMessage({
+        source: 'cg-int', type: 'guard-check', id: id,
+        event: event, content: content, url: url, label: 'POST'
+      }, '*');
+      // Fail open if the background never responds.
+      setTimeout(function () {
+        if (guardPending.has(id)) { guardPending.delete(id); resolve({ verdict: 'allow' }); }
+      }, 15000);
+    });
+  }
+
   // -- Overrides (defined once) --
+
+  // Existing allow/block-list verdict flow (human approval).
+  function fetchVerdictFlow(self, input, init, req, method, url, rawHeaders, hasAuth) {
+    if (verdict(method, url, hasAuth) === 'allow') {
+      log(method, url, 'allow');
+      return _fetch.call(self, input, init);
+    }
+
+    var hdrs = captureHeaders(rawHeaders);
+    var bod = captureBody((init && init.body) || (req ? req.body : null));
+    var reason = hasAuth ? 'Authorization header on ' + method + ' request' : isSameSite(url) ? 'Same-site ' + method + ' request' : 'Matched block rule';
+    console.warn('[Claude Guard] Blocked ' + method + ' ' + url + ' — waiting for human approval');
+    return ask(method, url, reason, hdrs, bod).then(function (act) {
+      log(method, url, act === 'deny' ? 'block' : 'allow');
+      if (act !== 'deny') return _fetch.call(self, input, init);
+      console.warn('[Claude Guard] DENIED ' + method + ' ' + url + ' — human denied this request. Do not retry.');
+      return blockedResponse(method, url);
+    });
+  }
 
   const fetchOverride = function (input, init) {
     var req = input instanceof Request ? input : null;
@@ -116,22 +255,30 @@
       hasAuth = h.has('Authorization') || h.has('authorization');
     } catch (e) {}
 
-    if (verdict(method, url, hasAuth) === 'allow') {
-      log(method, url, 'allow');
-      return _fetch.apply(this, arguments);
+    var self = this;
+
+    // Org guard content evaluation runs first for Claude.ai message/file sends.
+    var gEvent = guardEventFor(method, url);
+    if (gEvent) {
+      return captureGuardContent(gEvent, (init && init.body) != null ? init.body : null, req)
+        .then(function (content) {
+          if (!content) return null;
+          return guardAsk(gEvent, content, url);
+        })
+        .then(function (g) {
+          if (g && g.verdict === 'block') {
+            log(method, url, 'block');
+            console.warn('[Willow Guard] Blocked ' + (gEvent === 'PreToolUse' ? 'file upload' : 'message') + ' — ' + (g.reason || 'org policy'));
+            return guardBlockedResponse(method, url, g.reason);
+          }
+          return fetchVerdictFlow(self, input, init, req, method, url, rawHeaders, hasAuth);
+        })
+        .catch(function () {
+          return fetchVerdictFlow(self, input, init, req, method, url, rawHeaders, hasAuth);
+        });
     }
 
-    var self = this;
-    var hdrs = captureHeaders(rawHeaders);
-    var bod = captureBody((init && init.body) || (req ? req.body : null));
-    var reason = hasAuth ? 'Authorization header on ' + method + ' request' : isSameSite(url) ? 'Same-site ' + method + ' request' : 'Matched block rule';
-    console.warn('[Claude Guard] Blocked ' + method + ' ' + url + ' — waiting for human approval');
-    return ask(method, url, reason, hdrs, bod).then(function (act) {
-      log(method, url, act === 'deny' ? 'block' : 'allow');
-      if (act !== 'deny') return _fetch.call(self, input, init);
-      console.warn('[Claude Guard] DENIED ' + method + ' ' + url + ' — human denied this request. Do not retry.');
-      return blockedResponse(method, url);
-    });
+    return fetchVerdictFlow(self, input, init, req, method, url, rawHeaders, hasAuth);
   };
 
   const xhrOpenOverride = function (m, u) {
@@ -279,6 +426,7 @@
       allowList = d.allow || [];
       blockList = d.block || [];
       autoMode = d.auto !== false;
+      if (d.guard) guardCfg = d.guard;
       install();
     } else if (d.type === 'deactivate') {
       uninstall();
@@ -286,9 +434,13 @@
       if (d.allow) allowList = d.allow;
       if (d.block) blockList = d.block;
       if (d.auto !== undefined) autoMode = d.auto;
+      if (d.guard) guardCfg = d.guard;
     } else if (d.type === 'decision') {
       var r = pending.get(d.id);
       if (r) { pending.delete(d.id); r(d.action); }
+    } else if (d.type === 'guard-result') {
+      var gr = guardPending.get(d.id);
+      if (gr) { guardPending.delete(d.id); gr({ verdict: d.verdict, reason: d.reason }); }
     }
   });
 })();

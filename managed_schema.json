@@ -20,6 +20,22 @@
           "method":  { "type": "string" }
         }
       }
+    },
+    "serverUrl": {
+      "type": "string",
+      "description": "Base URL of the Willow connect service, e.g. https://acme.mcp-s.com. Used to evaluate Claude.ai messages and file uploads against org guards."
+    },
+    "authToken": {
+      "type": "string",
+      "description": "Org HMAC token in '{orgSlug}:{signature}' format, used as the Bearer token when calling the connect guard adapter."
+    },
+    "guardMessages": {
+      "type": "boolean",
+      "description": "When true, user messages sent on Claude.ai are evaluated against org guards before being sent."
+    },
+    "guardFiles": {
+      "type": "boolean",
+      "description": "When true, files uploaded on Claude.ai are evaluated against org guards before being sent."
     }
   }
 }

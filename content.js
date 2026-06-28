@@ -39,10 +39,11 @@
         type: 'activate',
         allow: state.allowList || [],
         block: state.blockList || [],
-        auto: state.autoMode !== false
+        auto: state.autoMode !== false,
+        guard: state.guard || { enabled: false, messages: false, files: false }
       }, '*');
     }).catch(function () {
-      window.postMessage({ source: 'cg-cs', type: 'activate', allow: [], block: [], auto: true }, '*');
+      window.postMessage({ source: 'cg-cs', type: 'activate', allow: [], block: [], auto: true, guard: { enabled: false, messages: false, files: false } }, '*');
     });
   }
 
@@ -202,6 +203,32 @@
         type: 'log-event',
         event: { method: d.method, url: d.url, action: d.action }
       }).catch(function () {});
+    }
+
+    // Interceptor asks us to evaluate user content (message/file) against org
+    // guards. The token + server URL live in the background worker, so we relay
+    // the request there and post the verdict back to the MAIN-world interceptor.
+    if (d.type === 'guard-check') {
+      chrome.runtime.sendMessage({
+        type: 'guard-evaluate',
+        event: d.event,
+        content: d.content
+      }).then(function (result) {
+        var verdict = (result && result.verdict) || 'allow';
+        if (verdict === 'block') {
+          showToast(d.label || 'POST', d.url || (d.event === 'PreToolUse' ? 'file upload' : 'message'), 'denied');
+        }
+        window.postMessage({
+          source: 'cg-cs',
+          type: 'guard-result',
+          id: d.id,
+          verdict: verdict,
+          reason: (result && result.reason) || ''
+        }, '*');
+      }).catch(function () {
+        // Fail open: never wedge the page if the background is unreachable.
+        window.postMessage({ source: 'cg-cs', type: 'guard-result', id: d.id, verdict: 'allow', reason: '' }, '*');
+      });
     }
   });
 

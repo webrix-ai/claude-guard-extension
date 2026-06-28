@@ -49,15 +49,78 @@ function getManagedRules() {
   });
 }
 
+// Guard config (server URL + org token + per-content toggles) is provisioned via
+// MDM into chrome.storage.managed only. The token never leaves the service
+// worker — content/interceptor scripts ask the background to evaluate content.
+function getGuardConfig() {
+  return chrome.storage.managed
+    .get(['serverUrl', 'authToken', 'guardMessages', 'guardFiles'])
+    .then(function (m) {
+      return {
+        serverUrl: typeof m.serverUrl === 'string' ? m.serverUrl.replace(/\/+$/, '') : '',
+        authToken: typeof m.authToken === 'string' ? m.authToken : '',
+        messages: m.guardMessages !== false && m.guardMessages !== undefined ? !!m.guardMessages : false,
+        files: !!m.guardFiles
+      };
+    })
+    .catch(function () {
+      return { serverUrl: '', authToken: '', messages: false, files: false };
+    });
+}
+
+// Public-facing guard flags for content scripts (no token, no server URL).
+function getGuardState() {
+  return getGuardConfig().then(function (cfg) {
+    var configured = !!cfg.serverUrl && !!cfg.authToken;
+    return {
+      enabled: configured && (cfg.messages || cfg.files),
+      messages: configured && cfg.messages,
+      files: configured && cfg.files
+    };
+  });
+}
+
+// Calls the connect Claude hook adapter to evaluate content against org guards.
+// Returns { verdict: 'block'|'warn'|'allow', reason }. Fails open on any error.
+function guardEvaluate(event, content) {
+  return getGuardConfig().then(function (cfg) {
+    if (!cfg.serverUrl || !cfg.authToken || !content) {
+      return { verdict: 'allow' };
+    }
+    var url = cfg.serverUrl + '/api/claude/hooks/evaluate';
+    return fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + cfg.authToken
+      },
+      body: JSON.stringify({ hook_event_name: event, content: content })
+    }).then(function (res) {
+      if (!res.ok) return { verdict: 'allow' };
+      return res.json().then(function (data) {
+        var verdict = data && data.verdict ? data.verdict : (data && data.decision === 'block' ? 'block' : 'allow');
+        var reason = (data && data.reason) ||
+          (data && data.hookSpecificOutput && data.hookSpecificOutput.permissionDecisionReason) ||
+          'Blocked by your organization\'s Willow security policy.';
+        return { verdict: verdict, reason: reason };
+      });
+    }).catch(function () {
+      return { verdict: 'allow' };
+    });
+  });
+}
+
 function getState() {
   return Promise.all([
     chrome.storage.local.get('cg'),
-    getManagedRules()
+    getManagedRules(),
+    getGuardState()
   ]).then(function (results) {
     var local = Object.assign({}, DEFAULT_STATE, results[0].cg);
     var managed = results[1];
     local.allowList = managed.allowList.concat(local.allowList);
     local.blockList = managed.blockList.concat(local.blockList);
+    local.guard = results[2];
     return local;
   });
 }
@@ -213,6 +276,12 @@ chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
     case 'get-tab-status':
       reply({ agentActive: agentTabs.has(msg.tabId) });
       return false;
+
+    case 'guard-evaluate':
+      guardEvaluate(msg.event, msg.content).then(function (result) {
+        reply(result);
+      });
+      return true;
 
     case 'request-blocked':
       if (sender.tab && sender.tab.id) {
