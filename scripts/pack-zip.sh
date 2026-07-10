@@ -21,6 +21,7 @@ zip -r "$DIST_DIR/$ZIP_NAME" \
   approve.html \
   approve.css \
   approve.js \
+  managed_schema.json \
   icons/
 
 echo "Packed $DIST_DIR/$ZIP_NAME"

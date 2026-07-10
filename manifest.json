@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Claude Guard",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Lightweight request guardian for Claude browser agents. Monitors, blocks, and approves HTTP requests in real-time.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAy4NYntXRHgDcYdRwZHfSg2m6XwORcxqvecRu25Exem03pZHGW45PBsQu7ojKTHFlxrk34spxL5sesRxQLPYuh5G972/3vFH7KIgueXf00pnmYqyYzPEKQGKl1ewcMbEtOO5SqdaYgIyTGZ31Qv6dEYSmy94IEnLZLkvMJQzyD1TJ2emyIkH1E3X+3dME1FZhnakpJVQ0W8Vzw+sLn2SD1uvar5a16momFzUIt1BDygVotik603zDdcy++kRFGLOSBqehAexnUebZXdj7kkidSkjKWplkHQU+93K8FkIc7wBe2y3qKUuZUbyBwpiuxxuHUfCobQZ1JIg5PI4I18nB5QIDAQAB",
   "permissions": [
@@ -16,14 +16,22 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["interceptor.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "interceptor.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_start"
     }
   ],
