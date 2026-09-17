@@ -112,10 +112,16 @@ with open(dst, "wb") as f:
 
 allow = len(settings.get("allowList", [])) if isinstance(settings, dict) else 0
 block = len(settings.get("blockList", [])) if isinstance(settings, dict) else 0
+redact = len(settings.get("redactList", [])) if isinstance(settings, dict) else 0
+guards = len(settings.get("guards", {})) if isinstance(settings, dict) else 0
 print(f"Installed: {dst}")
-print(f"  extensionId: {ext_id}")
-print(f"  allow rules: {allow}")
-print(f"  block rules: {block}")
+print(f"  extensionId:     {ext_id}")
+print(f"  allow rules:     {allow}")
+print(f"  block rules:     {block}")
+print(f"  redact rules:    {redact}")
+print(f"  guard overrides: {guards}")
+if isinstance(settings, dict) and "guardMinCertainty" in settings:
+    print(f"  min certainty:   {settings['guardMinCertainty']}")
 PY
 
 echo ""

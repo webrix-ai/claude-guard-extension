@@ -9,6 +9,51 @@
   var toastContainer = null;
   var originalTitle = '';
 
+  // Redaction engine (lib/redactor.js is loaded before this script).
+  var Redactor = (typeof self !== 'undefined' && self.ClaudeGuardRedactor) || null;
+  var redactor = Redactor ? Redactor.createRedactor(document) : null;
+  var redactPending = 0;
+  var redactTimer = null;
+
+  if (redactor) {
+    redactor.onRedact(function (res) {
+      redactPending += res.text + res.elements;
+      if (redactTimer) return;
+      // Batch bursts of DOM mutations into one report + one toast.
+      redactTimer = setTimeout(flushRedactReport, 400);
+    });
+  }
+
+  function flushRedactReport() {
+    redactTimer = null;
+    var n = redactPending;
+    redactPending = 0;
+    if (n <= 0) return;
+    console.info('[Claude Guard] Redacted ' + n + ' sensitive item' + (n === 1 ? '' : 's') + ' from this page.');
+    pushToast('\uD83D\uDEE1\uFE0F [Claude Guard] Redacted ' + n + ' sensitive item' + (n === 1 ? '' : 's') + ' from this page \u2014 the information is intentionally unavailable.', 'redacted', 8000);
+    chrome.runtime.sendMessage({ type: 'redact-event', count: n }).catch(function () {});
+  }
+
+  /**
+   * (Re)start redaction from a state/broadcast payload:
+   * { redactEnabled, redactList, guards, guardMinCertainty }.
+   */
+  function applyRedaction(cfg) {
+    if (!redactor) return;
+    cfg = cfg || {};
+    if (!agentActive || cfg.redactEnabled === false) {
+      redactor.stop();
+      return;
+    }
+    redactor.start({
+      rules: cfg.redactList || [],
+      guards: cfg.guards || {},
+      minCertainty: cfg.guardMinCertainty
+    }, location.href);
+    var errors = redactor.errors();
+    if (errors.length) console.warn('[Claude Guard] Skipped ' + errors.length + ' invalid redaction rule(s):', errors);
+  }
+
   // If this tab is a group peer of an active agent tab, activate immediately
   chrome.runtime.sendMessage({ type: 'check-agent-status' }).then(function (resp) {
     if (resp && resp.agentActive && !agentActive) {
@@ -28,12 +73,13 @@
     } else if (!found && agentActive) {
       agentActive = false;
       chrome.runtime.sendMessage({ type: 'agent-off' }).catch(function () {});
-      window.postMessage({ source: 'cg-cs', type: 'deactivate' }, '*');
+      deactivate();
     }
   }
 
   function activate() {
     chrome.runtime.sendMessage({ type: 'get-state' }).then(function (state) {
+      state = state || {};
       window.postMessage({
         source: 'cg-cs',
         type: 'activate',
@@ -41,9 +87,16 @@
         block: state.blockList || [],
         auto: state.autoMode !== false
       }, '*');
+      applyRedaction(state);
     }).catch(function () {
       window.postMessage({ source: 'cg-cs', type: 'activate', allow: [], block: [], auto: true }, '*');
     });
+  }
+
+  function deactivate() {
+    window.postMessage({ source: 'cg-cs', type: 'deactivate' }, '*');
+    // Redacted content is not restored — it was removed on purpose.
+    if (redactor) redactor.stop();
   }
 
   // --------------- Waiting Banner (visible to Claude) ---------------
@@ -105,15 +158,31 @@
     return toastContainer;
   }
 
-  function showToast(method, url, status) {
-    var container = ensureToastContainer();
-    var toast = document.createElement('div');
-    toast.setAttribute('data-claude-guard-toast', status);
+  var TOAST_TONES = {
+    blocked:  { bg: '#fef2f2', border: '#fca5a5', color: '#991b1b' },
+    denied:   { bg: '#fef2f2', border: '#fca5a5', color: '#991b1b' },
+    approved: { bg: '#f0fdf4', border: '#86efac', color: '#166534' },
+    redacted: { bg: '#eef2ff', border: '#a5b4fc', color: '#3730a3' }
+  };
 
-    var isBlock = (status === 'blocked' || status === 'denied');
-    var bg = isBlock ? '#fef2f2' : '#f0fdf4';
-    var border = isBlock ? '#fca5a5' : '#86efac';
-    var color = isBlock ? '#991b1b' : '#166534';
+  function pushToast(text, tone, ttl) {
+    var container = ensureToastContainer();
+    var t = TOAST_TONES[tone] || TOAST_TONES.approved;
+    var toast = document.createElement('div');
+    toast.setAttribute('data-claude-guard-toast', tone);
+    toast.style.cssText = [
+      'background:' + t.bg, 'border:1px solid ' + t.border, 'color:' + t.color,
+      'border-radius:8px', 'padding:8px 12px',
+      'box-shadow:0 2px 8px rgba(0,0,0,0.08)',
+      'pointer-events:none'
+    ].join(';');
+    toast.textContent = text;
+    container.appendChild(toast);
+    setTimeout(function () { toast.remove(); }, ttl || 8000);
+    return toast;
+  }
+
+  function showToast(method, url, status) {
     var icon = status === 'blocked' ? '\u23F3' : status === 'denied' ? '\u274C' : '\u2705';
 
     var shortUrl = url;
@@ -126,18 +195,7 @@
         ? 'DENIED by human — do NOT retry'
         : 'APPROVED by human';
 
-    toast.style.cssText = [
-      'background:' + bg, 'border:1px solid ' + border, 'color:' + color,
-      'border-radius:8px', 'padding:8px 12px',
-      'box-shadow:0 2px 8px rgba(0,0,0,0.08)',
-      'pointer-events:none'
-    ].join(';');
-    toast.textContent = icon + ' [Claude Guard] ' + method + ' ' + shortUrl + ' — ' + label;
-
-    container.appendChild(toast);
-
-    var ttl = status === 'blocked' ? 30000 : 8000;
-    setTimeout(function () { toast.remove(); }, ttl);
+    pushToast(icon + ' [Claude Guard] ' + method + ' ' + shortUrl + ' — ' + label, status, status === 'blocked' ? 30000 : 8000);
   }
 
   // --------------- Message Bridge ---------------
@@ -153,7 +211,7 @@
     if (msg.type === 'group-agent-off') {
       if (agentActive) {
         agentActive = false;
-        window.postMessage({ source: 'cg-cs', type: 'deactivate' }, '*');
+        deactivate();
       }
     }
 
@@ -165,6 +223,7 @@
         block: msg.blockList,
         auto: msg.autoMode
       }, '*');
+      if (agentActive) applyRedaction(msg);
     }
 
     if (msg.type === 'approval-decision') {

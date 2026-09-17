@@ -1,12 +1,27 @@
 {
   "name": "claude-guard-extension",
-  "version": "1.1.1",
-  "description": "Lightweight request guardian for Claude browser agents",
+  "version": "1.2.0",
+  "description": "Request guardian and data minimizer for Claude browser agents — blocks, approves, and redacts in real-time.",
   "license": "ISC",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/webrix-ai/claude-guard-extension.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
+    "test": "node --test --test-timeout=20000 'test/**/*.test.js'",
+    "test:watch": "node --test --watch 'test/**/*.test.js'",
+    "lint": "node scripts/check-syntax.js",
     "icons": "node scripts/generate-icons.js",
+    "icons:png": "node scripts/generate-png-icons.js",
     "version-sync": "node scripts/version-sync.js",
     "pack:zip": "npm run version-sync && bash scripts/pack-zip.sh",
-    "build": "npm run pack:zip"
+    "build": "npm run lint && npm test && npm run pack:zip"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
   }
 }

@@ -3,23 +3,56 @@
   "properties": {
     "allowList": {
       "type": "array",
+      "description": "Requests matching these rules are always allowed.",
       "items": {
         "type": "object",
         "properties": {
-          "pattern": { "type": "string" },
-          "method":  { "type": "string" }
+          "pattern": { "type": "string", "description": "URL glob, e.g. *://api.example.com/*" },
+          "method":  { "type": "string", "description": "HTTP method or * (default)" }
         }
       }
     },
     "blockList": {
       "type": "array",
+      "description": "Requests matching these rules are always sent for approval.",
       "items": {
         "type": "object",
         "properties": {
-          "pattern": { "type": "string" },
-          "method":  { "type": "string" }
+          "pattern": { "type": "string", "description": "URL glob, e.g. *://evil.example.com/*" },
+          "method":  { "type": "string", "description": "HTTP method or * (default)" }
         }
       }
+    },
+    "redactList": {
+      "type": "array",
+      "description": "Custom information to remove from pages while a Claude agent is active.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind":        { "type": "string", "enum": ["text", "regex", "selector"] },
+          "value":       { "type": "string", "description": "Literal text, regex source, or CSS selector" },
+          "flags":       { "type": "string", "description": "Regex flags (regex kind only); g is always added" },
+          "scope":       { "type": "string", "description": "Optional URL glob limiting where the rule applies" },
+          "replacement": { "type": "string", "description": "Replacement text (default [REDACTED])" }
+        }
+      }
+    },
+    "guards": {
+      "type": "object",
+      "description": "Built-in guard overrides keyed by guard id (secrets, email, phone, ssn, credit-card, ip-address, financial, dob, government-id, address). Managed entries are read-only in the popup.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "enabled":        { "type": "boolean" },
+          "disabledChecks": { "type": "array", "items": { "type": "string" }, "description": "Check ids to skip, e.g. regex-us-phone-number" }
+        }
+      }
+    },
+    "guardMinCertainty": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10,
+      "description": "Guard checks rated below this certainty are ignored (default 6)."
     }
   }
 }

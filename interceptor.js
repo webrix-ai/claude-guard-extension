@@ -21,7 +21,7 @@
     if (!rule.pattern || rule.pattern === '*') return true;
     try {
       var re = new RegExp(
-        '^' + rule.pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$', 'i'
+        '^' + rule.pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$', 'i'
       );
       return re.test(url);
     } catch (e) { return false; }

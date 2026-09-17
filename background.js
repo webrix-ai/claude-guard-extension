@@ -30,23 +30,52 @@ var approvePort = null;
 var approveWindowId = null;
 var pendingApprovals = new Map();
 
+// Rule lists that can be managed by the user (popup) and/or by policy (MDM).
+var RULE_LISTS = { allow: 'allowList', block: 'blockList', redact: 'redactList' };
+var LIST_NAMES = Object.keys(RULE_LISTS).map(function (k) { return RULE_LISTS[k]; });
+
+var DEFAULT_MIN_CERTAINTY = 6;
+
 var DEFAULT_STATE = {
   allowList: [],
   blockList: [],
+  redactList: [],
+  // Built-in guard overrides: { [guardId]: { enabled, disabledChecks } }.
+  // Guards absent here use their catalog default.
+  guards: {},
+  guardMinCertainty: DEFAULT_MIN_CERTAINTY,
   autoMode: true,
-  stats: { blocked: 0, allowed: 0 },
+  redactEnabled: true,
+  stats: { blocked: 0, allowed: 0, redacted: 0 },
   log: []
 };
 
+var MANAGED_KEYS = LIST_NAMES.concat(['guards', 'guardMinCertainty']);
+
+function tagManaged(rules) {
+  return (rules || []).map(function (r) { return Object.assign({}, r, { managed: true }); });
+}
+
+function emptyManaged() {
+  var out = { guards: null, guardMinCertainty: null };
+  LIST_NAMES.forEach(function (name) { out[name] = []; });
+  return out;
+}
+
 function getManagedRules() {
-  return chrome.storage.managed.get(['allowList', 'blockList']).then(function (managed) {
-    return {
-      allowList: (managed.allowList || []).map(function (r) { return Object.assign({}, r, { managed: true }); }),
-      blockList: (managed.blockList || []).map(function (r) { return Object.assign({}, r, { managed: true }); })
-    };
-  }).catch(function () {
-    return { allowList: [], blockList: [] };
-  });
+  return chrome.storage.managed.get(MANAGED_KEYS).then(function (managed) {
+    var out = emptyManaged();
+    LIST_NAMES.forEach(function (name) { out[name] = tagManaged(managed[name]); });
+    if (managed.guards && typeof managed.guards === 'object') out.guards = managed.guards;
+    if (typeof managed.guardMinCertainty === 'number') out.guardMinCertainty = managed.guardMinCertainty;
+    return out;
+  }).catch(emptyManaged);
+}
+
+function clampCertainty(v) {
+  var n = Number(v);
+  if (!isFinite(n)) return DEFAULT_MIN_CERTAINTY;
+  return Math.min(10, Math.max(1, Math.round(n)));
 }
 
 function getState() {
@@ -55,21 +84,58 @@ function getState() {
     getManagedRules()
   ]).then(function (results) {
     var local = Object.assign({}, DEFAULT_STATE, results[0].cg);
+    // Older installs may lack newer fields — fill them in without clobbering counts.
+    local.stats = Object.assign({}, DEFAULT_STATE.stats, local.stats);
+    local.guards = Object.assign({}, local.guards);
+    local.guardMinCertainty = clampCertainty(local.guardMinCertainty);
     var managed = results[1];
-    local.allowList = managed.allowList.concat(local.allowList);
-    local.blockList = managed.blockList.concat(local.blockList);
+    LIST_NAMES.forEach(function (name) {
+      local[name] = managed[name].concat(local[name] || []);
+    });
+    // Policy wins over local guard settings and is marked read-only.
+    if (managed.guards) {
+      Object.keys(managed.guards).forEach(function (id) {
+        var m = managed.guards[id];
+        if (!m || typeof m !== 'object') return;
+        local.guards[id] = Object.assign({}, m, { managed: true });
+      });
+    }
+    if (managed.guardMinCertainty !== null) {
+      local.guardMinCertainty = clampCertainty(managed.guardMinCertainty);
+      local.guardMinCertaintyManaged = true;
+    }
     return local;
   });
 }
 
 function setState(state) {
-  // Managed (MDM/policy) rules live in chrome.storage.managed only —
+  // Managed (MDM/policy) values live in chrome.storage.managed only —
   // strip them so they are never persisted into local storage.
-  var local = Object.assign({}, state, {
-    allowList: state.allowList.filter(function (r) { return !r.managed; }),
-    blockList: state.blockList.filter(function (r) { return !r.managed; })
+  var local = Object.assign({}, state);
+  LIST_NAMES.forEach(function (name) {
+    local[name] = (state[name] || []).filter(function (r) { return !r.managed; });
   });
+  local.guards = {};
+  Object.keys(state.guards || {}).forEach(function (id) {
+    if (!state.guards[id] || state.guards[id].managed) return;
+    local.guards[id] = state.guards[id];
+  });
+  if (state.guardMinCertaintyManaged) delete local.guardMinCertainty;
+  delete local.guardMinCertaintyManaged;
   return chrome.storage.local.set({ cg: local });
+}
+
+function rulesPayload(state) {
+  return {
+    type: 'rules-updated',
+    allowList: state.allowList,
+    blockList: state.blockList,
+    redactList: state.redactList,
+    guards: state.guards,
+    guardMinCertainty: state.guardMinCertainty,
+    autoMode: state.autoMode,
+    redactEnabled: state.redactEnabled
+  };
 }
 
 function broadcast(msg) {
@@ -77,6 +143,23 @@ function broadcast(msg) {
     tabs.forEach(function (t) {
       chrome.tabs.sendMessage(t.id, msg).catch(function () {});
     });
+  });
+}
+
+function sameRule(a, b) {
+  if (!a || !b) return false;
+  if (a.kind || b.kind) {
+    return a.kind === b.kind && a.value === b.value && (a.scope || '*') === (b.scope || '*');
+  }
+  return a.pattern === b.pattern && (a.method || '*') === (b.method || '*');
+}
+
+// Live policy pushes: when the managed area changes, re-broadcast merged rules
+// so active tabs pick them up without a reload.
+if (chrome.storage.onChanged) {
+  chrome.storage.onChanged.addListener(function (changes, area) {
+    if (area !== 'managed') return;
+    getState().then(function (s) { broadcast(rulesPayload(s)); });
   });
 }
 
@@ -175,12 +258,7 @@ chrome.runtime.onConnect.addListener(function (port) {
             if (!exists) {
               s.allowList.push({ pattern: pattern, method: '*' });
               setState(s).then(function () {
-                broadcast({
-                  type: 'rules-updated',
-                  allowList: s.allowList,
-                  blockList: s.blockList,
-                  autoMode: s.autoMode
-                });
+                broadcast(rulesPayload(s));
               });
             }
           });
@@ -230,34 +308,118 @@ chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
 
     case 'set-auto-mode':
       getState().then(function (s) {
-        s.autoMode = msg.enabled;
+        s.autoMode = !!msg.enabled;
         return setState(s).then(function () {
-          broadcast({ type: 'rules-updated', allowList: s.allowList, blockList: s.blockList, autoMode: s.autoMode });
+          broadcast(rulesPayload(s));
           reply({ ok: true });
+        });
+      });
+      return true;
+
+    case 'set-redact-enabled':
+      getState().then(function (s) {
+        s.redactEnabled = !!msg.enabled;
+        return setState(s).then(function () {
+          broadcast(rulesPayload(s));
+          reply({ ok: true });
+        });
+      });
+      return true;
+
+    case 'set-guard':
+      // { guardId, enabled?: boolean, disabledChecks?: string[] } — partial update.
+      getState().then(function (s) {
+        if (typeof msg.guardId !== 'string' || !msg.guardId) {
+          reply({ ok: false, error: 'Invalid guard id' });
+          return;
+        }
+        var current = s.guards[msg.guardId] || {};
+        if (current.managed) {
+          reply({ ok: false, error: 'Managed guards cannot be changed' });
+          return;
+        }
+        var next = Object.assign({}, current);
+        if (typeof msg.enabled === 'boolean') next.enabled = msg.enabled;
+        if (Array.isArray(msg.disabledChecks)) {
+          next.disabledChecks = msg.disabledChecks.filter(function (id) { return typeof id === 'string'; });
+        }
+        s.guards[msg.guardId] = next;
+        return setState(s).then(function () {
+          broadcast(rulesPayload(s));
+          reply({ ok: true });
+        });
+      });
+      return true;
+
+    case 'set-guard-check':
+      // Toggle a single check within a guard.
+      getState().then(function (s) {
+        if (typeof msg.guardId !== 'string' || typeof msg.checkId !== 'string') {
+          reply({ ok: false, error: 'Invalid guard or check id' });
+          return;
+        }
+        var g = s.guards[msg.guardId] || {};
+        if (g.managed) {
+          reply({ ok: false, error: 'Managed guards cannot be changed' });
+          return;
+        }
+        var disabled = (g.disabledChecks || []).filter(function (id) { return id !== msg.checkId; });
+        if (msg.disabled) disabled.push(msg.checkId);
+        s.guards[msg.guardId] = Object.assign({}, g, { disabledChecks: disabled });
+        return setState(s).then(function () {
+          broadcast(rulesPayload(s));
+          reply({ ok: true });
+        });
+      });
+      return true;
+
+    case 'set-guard-min-certainty':
+      getState().then(function (s) {
+        if (s.guardMinCertaintyManaged) {
+          reply({ ok: false, error: 'Minimum certainty is managed by policy' });
+          return;
+        }
+        s.guardMinCertainty = clampCertainty(msg.value);
+        return setState(s).then(function () {
+          broadcast(rulesPayload(s));
+          reply({ ok: true, value: s.guardMinCertainty });
         });
       });
       return true;
 
     case 'add-rule':
       getState().then(function (s) {
-        var list = msg.list === 'allow' ? 'allowList' : 'blockList';
-        var exists = s[list].some(function (r) {
-          return r.pattern === msg.rule.pattern && r.method === msg.rule.method;
-        });
-        if (!exists) s[list].push(msg.rule);
+        var list = RULE_LISTS[msg.list];
+        if (!list || !msg.rule || typeof msg.rule !== 'object') {
+          reply({ ok: false, error: 'Invalid rule' });
+          return;
+        }
+        var rule = Object.assign({}, msg.rule);
+        delete rule.managed; // only policy may mark rules as managed
+        var exists = s[list].some(function (r) { return sameRule(r, rule); });
+        if (!exists) s[list].push(rule);
         return setState(s).then(function () {
-          broadcast({ type: 'rules-updated', allowList: s.allowList, blockList: s.blockList, autoMode: s.autoMode });
-          reply({ ok: true });
+          broadcast(rulesPayload(s));
+          reply({ ok: true, added: !exists });
         });
       });
       return true;
 
     case 'remove-rule':
       getState().then(function (s) {
-        var list = msg.list === 'allow' ? 'allowList' : 'blockList';
-        s[list].splice(msg.index, 1);
+        var list = RULE_LISTS[msg.list];
+        var index = msg.index;
+        if (!list || typeof index !== 'number' || index < 0 || index >= s[list].length) {
+          reply({ ok: false, error: 'Invalid rule index' });
+          return;
+        }
+        if (s[list][index].managed) {
+          reply({ ok: false, error: 'Managed rules cannot be removed' });
+          return;
+        }
+        s[list].splice(index, 1);
         return setState(s).then(function () {
-          broadcast({ type: 'rules-updated', allowList: s.allowList, blockList: s.blockList, autoMode: s.autoMode });
+          broadcast(rulesPayload(s));
           reply({ ok: true });
         });
       });
@@ -273,9 +435,17 @@ chrome.runtime.onMessage.addListener(function (msg, sender, reply) {
       });
       return true;
 
+    case 'redact-event':
+      getState().then(function (s) {
+        var n = Number(msg.count) || 0;
+        if (n > 0) s.stats.redacted += n;
+        return setState(s).then(function () { reply({ ok: true }); });
+      });
+      return true;
+
     case 'clear-stats':
       getState().then(function (s) {
-        s.stats = { blocked: 0, allowed: 0 };
+        s.stats = { blocked: 0, allowed: 0, redacted: 0 };
         s.log = [];
         return setState(s).then(function () { reply({ ok: true }); });
       });

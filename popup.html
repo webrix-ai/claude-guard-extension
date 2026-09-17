@@ -85,6 +85,56 @@
 
   <hr>
 
+  <section class="setting">
+    <div class="setting-info">
+      <div class="setting-label">Redaction</div>
+      <div class="setting-desc">Remove sensitive text &amp; elements from pages while the agent is active</div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="redactEnabled">
+      <span class="slider"></span>
+    </label>
+  </section>
+
+  <section class="list-section">
+    <div class="list-head">
+      <h3>Guards <span class="count" id="guardCount">0</span></h3>
+      <label class="min-certainty" title="Checks rated below this certainty are ignored">
+        <span>Min. certainty</span>
+        <select id="guardMinCertainty" aria-label="Minimum certainty"></select>
+      </label>
+    </div>
+    <div class="guards" id="guardList"></div>
+  </section>
+
+  <section class="list-section">
+    <div class="list-head">
+      <h3>Custom Rules <span class="count" id="redactCount">0</span></h3>
+      <button class="icon-btn" id="addRedact" title="Add redaction rule">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+      </button>
+    </div>
+    <div class="add-form" id="redactForm" hidden>
+      <select id="redactKind" aria-label="Rule kind">
+        <option value="text">Exact text (case-insensitive)</option>
+        <option value="regex">Regular expression</option>
+        <option value="selector">CSS selector (remove element)</option>
+      </select>
+      <input type="text" id="redactValue" placeholder="Text to redact" spellcheck="false">
+      <input type="text" id="redactScope" placeholder="Scope (optional) — *://bank.example.com/*" spellcheck="false">
+      <div class="form-error" id="redactError" hidden></div>
+      <div class="form-btns">
+        <button class="btn-text" data-cancel="redact">Cancel</button>
+        <button class="btn-sm" data-confirm="redact">Add</button>
+      </div>
+    </div>
+    <div class="rules" id="redactList"></div>
+  </section>
+
+  <hr>
+
   <footer>
     <div class="stats">
       <div class="stat">
@@ -95,10 +145,16 @@
         <span class="num" id="allowedNum">0</span>
         <span class="lbl">allowed</span>
       </div>
+      <div class="stat">
+        <span class="num" id="redactedNum">0</span>
+        <span class="lbl">redacted</span>
+      </div>
     </div>
     <button class="btn-text btn-reset" id="clearStats">Reset</button>
   </footer>
 
+  <script src="lib/guards.js"></script>
+  <script src="lib/redactor.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
