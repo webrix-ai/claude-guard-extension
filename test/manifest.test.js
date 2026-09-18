@@ -77,9 +77,11 @@ describe('packaging', () => {
       ...manifest.content_scripts.flatMap((cs) => cs.js),
       ...Object.values(manifest.icons)
     ]);
-    // Files pulled in by the HTML pages.
+    // Local files pulled in by the HTML pages (external links are not packaged).
     for (const html of ['popup.html', 'approve.html']) {
-      for (const m of read(html).matchAll(/(?:src|href)="([^"]+)"/g)) needed.add(m[1]);
+      for (const m of read(html).matchAll(/(?:src|href)="([^"]+)"/g)) {
+        if (!/^[a-z]+:/i.test(m[1])) needed.add(m[1]);
+      }
     }
     for (const rel of needed) assert.ok(shipped(rel), `${rel} not in pack-zip.sh`);
   });

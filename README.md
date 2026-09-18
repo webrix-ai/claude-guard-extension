@@ -6,7 +6,8 @@
 
 <p align="center">
   A request guardian and data minimizer for <a href="https://www.anthropic.com/claude">Claude</a> browser agents.<br>
-  Blocks risky requests behind human approval and <strong>removes sensitive information from the page</strong> before the agent can read it.
+  Blocks risky requests behind human approval and <strong>removes sensitive information from the page</strong> before the agent can read it.<br>
+  Made by <a href="https://willow.security"><strong>Willow</strong></a>.
 </p>
 
 <p align="center">
@@ -263,8 +264,6 @@ The suite runs in Node with no browser required:
 
 | Command | Description |
 |---|---|
-| `npm run icons` | Regenerate SVG icons |
-| `npm run icons:png` | Rasterize PNG icons (inactive + active) |
 | `npm run version-sync` | Copy `package.json` version into `manifest.json` |
 | `npm run pack:zip` | Build the distributable zip without running checks |
 
@@ -283,7 +282,7 @@ The suite runs in Node with no browser required:
 ├── managed_schema.json      Managed-storage policy schema
 ├── generate-mobileconfig.sh Build/apply an MDM profile
 ├── install-mobileconfig.sh  Apply a profile locally
-├── scripts/                 Icon generation, version sync, packaging, syntax check
+├── scripts/                 Version sync, packaging, syntax check
 └── test/                    node:test suite + helpers
 ```
 
@@ -304,4 +303,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Changes are tracked in [CHANGELOG.md](CH
 
 ## License
 
-[ISC](LICENSE)
+[ISC](LICENSE) © [Willow](https://willow.security)

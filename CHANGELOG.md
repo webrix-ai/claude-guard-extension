@@ -3,6 +3,15 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- Willow attribution in the popup footer, the approval window titlebar, the extension description and the README.
+
+### Removed
+- Leftover Webrix wordmark logos (`FullLogoB.svg`, `FullLogoW.svg`), which nothing referenced.
+- README documentation for the `npm run icons` / `npm run icons:png` scripts, which no longer exist.
+
 ## [1.2.0] - 2026-09-16
 
 ### Added

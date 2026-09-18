@@ -1,7 +1,8 @@
 {
   "name": "claude-guard-extension",
   "version": "1.2.0",
-  "description": "Request guardian and data minimizer for Claude browser agents — blocks, approves, and redacts in real-time.",
+  "description": "Request guardian and data minimizer for Claude browser agents — blocks, approves, and redacts in real-time. By Willow.",
+  "author": "Willow (https://willow.security)",
   "license": "ISC",
   "private": true,
   "repository": {
@@ -15,8 +16,6 @@
     "test": "node --test --test-timeout=20000 'test/**/*.test.js'",
     "test:watch": "node --test --watch 'test/**/*.test.js'",
     "lint": "node scripts/check-syntax.js",
-    "icons": "node scripts/generate-icons.js",
-    "icons:png": "node scripts/generate-png-icons.js",
     "version-sync": "node scripts/version-sync.js",
     "pack:zip": "npm run version-sync && bash scripts/pack-zip.sh",
     "build": "npm run lint && npm test && npm run pack:zip"

@@ -412,3 +412,16 @@ footer {
 .stat .num { font-weight: 700; font-size: 15px; color: #0f172a; }
 .stat .lbl { font-size: 11px; color: #94a3b8; }
 .btn-reset { font-size: 11px; }
+
+.credit {
+  padding: 0 16px 12px;
+  font-size: 11px;
+  color: #94a3b8;
+  text-align: center;
+}
+.credit a {
+  color: #6366f1;
+  font-weight: 600;
+  text-decoration: none;
+}
+.credit a:hover { text-decoration: underline; }

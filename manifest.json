@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Claude Guard",
   "version": "1.2.0",
-  "description": "Request guardian and data minimizer for Claude browser agents. Blocks, approves, and redacts in real-time.",
+  "description": "Request guardian and data minimizer for Claude browser agents. Blocks, approves, and redacts in real-time. By Willow.",
   "permissions": [
     "storage",
     "tabs"
