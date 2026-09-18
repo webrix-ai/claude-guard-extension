@@ -13,8 +13,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test --test-timeout=20000 'test/**/*.test.js'",
-    "test:watch": "node --test --watch 'test/**/*.test.js'",
+    "test": "node --test --test-timeout=20000 test/*.test.js",
+    "test:watch": "node --test --watch test/*.test.js",
     "lint": "node scripts/check-syntax.js",
     "version-sync": "node scripts/version-sync.js",
     "pack:zip": "npm run version-sync && bash scripts/pack-zip.sh",

@@ -111,12 +111,10 @@ if [ -n "$MIN_CERTAINTY" ]; then
     esac
 fi
 
+# sed, not ${s//&/&amp;}: bash 5.2's patsub_replacement expands an unquoted `&`
+# in the replacement to the matched text, which mangles the entities.
 xml_escape() {
-    local s="$1"
-    s="${s//&/&amp;}"
-    s="${s//</&lt;}"
-    s="${s//>/&gt;}"
-    printf '%s' "$s"
+    printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
 }
 
 MANAGED_PREFS_DIR="/Library/Managed Preferences"
